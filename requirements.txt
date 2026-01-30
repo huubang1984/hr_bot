@@ -5,5 +5,4 @@ langchain-google-genai
 langchain-chroma
 chromadb
 python-dotenv
-# Bỏ ghim phiên bản cũ của tiktoken để hệ thống tự lấy bản mới nhất
 tiktoken>=0.7.0
