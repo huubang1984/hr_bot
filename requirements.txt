@@ -1,9 +1,9 @@
-langchain==0.1.0
-langchain-community==0.0.10
-langchain-core==0.1.10
-langchain-openai==0.0.2
-chromadb==0.4.22
-tiktoken==0.5.2
 streamlit
+langchain
+langchain-community
+langchain-google-genai
+langchain-chroma
+chromadb
 python-dotenv
-openai
+# Bỏ ghim phiên bản cũ của tiktoken để hệ thống tự lấy bản mới nhất
+tiktoken>=0.7.0
