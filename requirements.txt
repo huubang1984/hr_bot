@@ -1,8 +1,12 @@
 streamlit
-langchain
-langchain-community
+# Ghim phiên bản chuẩn để tránh xung đột
+langchain==0.3.0
+langchain-community==0.3.0
+langchain-core==0.3.0
+langchain-text-splitters==0.3.0
 langchain-google-genai
 langchain-chroma
 chromadb
 python-dotenv
+# Bắt buộc cho Python 3.13 trên Streamlit Cloud
 tiktoken>=0.7.0
