@@ -3,10 +3,10 @@ import time
 import glob
 import google.generativeai as genai
 
-# CẤU HÌNH
-API_KEY = "AIzaSyC5GephZ338_CleQ7vlI7xpt7HkJ9Z6C6Y"
-INPUT_FOLDER = "./scanned_pdfs" # Nơi để file PDF scan
-OUTPUT_FOLDER = "./data"        # Nơi xuất file TXT cho RAG học
+# CẤU HÌNH: Lấy key từ biến môi trường (An toàn hơn)
+API_KEY = os.environ.get("GOOGLE_API_KEY") 
+INPUT_FOLDER = "./scanned_pdfs"
+OUTPUT_FOLDER = "./data"
 
 def ocr_with_gemini():
     # 1. Setup

@@ -1,0 +1,40 @@
+name: Auto OCR PDF with Gemini
+
+# Robot sẽ thức dậy khi bạn upload file vào thư mục scanned_pdfs
+on:
+  push:
+    paths:
+      - 'scanned_pdfs/**.pdf'
+
+permissions:
+  contents: write
+
+jobs:
+  ocr-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lấy code về
+        uses: actions/checkout@v4
+
+      - name: Cài đặt Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cài thư viện cần thiết
+        run: |
+          pip install google-generativeai
+
+      - name: Chạy tool OCR
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python ocr_tool.py
+
+      - name: Lưu file TXT mới vào GitHub
+        run: |
+          git config --global user.name "Gemini OCR Bot"
+          git config --global user.email "bot@takagi.vn"
+          git add data/*.txt
+          # Chỉ commit nếu có thay đổi
+          git commit -m "🤖 AI đã đọc xong tài liệu mới" || echo "Không có thay đổi gì"
+          git push
