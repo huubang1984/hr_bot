@@ -63,7 +63,7 @@ class EnterpriseRAG:
         print(f"-> Tổng cộng đã tìm thấy {len(documents)} trang tài liệu.")
 
         # 2. Chia nhỏ văn bản (Split)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=2000)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
         texts = text_splitter.split_documents(documents)
 
         # 3. Tạo Vector Store
