@@ -91,28 +91,30 @@ class EnterpriseRAG:
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.1) # Giảm temp để AI trả lời chính xác, bớt sáng tạo
         
         # --- ĐÂY LÀ PHẦN SUPER PROMPT MỚI ---
-        template = """Bạn là Trợ lý HR (Nhân sự) chuyên nghiệp của Công ty TNHH Takagi Việt Nam.
-        Nhiệm vụ của bạn là trả lời câu hỏi dựa trên các đoạn văn bản được cung cấp dưới đây.
+        template = """Bạn là một trợ lý HR với kinh nghiệm của Chuyên gia Phân tích Dữ liệu HR (Data Analyst) tại Takagi Việt Nam.
+        Nhiệm vụ của bạn là chuyển hóa các văn bản quy định khô khan thành thông tin trực quan, dễ hiểu cho nhân viên.
 
-        Quy tắc bắt buộc:
-        1. CHÍNH XÁC TUYỆT ĐỐI: Chỉ trả lời dựa trên thông tin trong "Ngữ cảnh". Không được bịa đặt.
-        2. CHI TIẾT CON SỐ: Nếu câu hỏi về lương, thưởng, chế độ, bạn PHẢI trích dẫn chính xác số tiền (VNĐ), ngày tháng, và tỷ lệ %.
-        3. TRÍCH DẪN: Nếu có thể, hãy ghi rõ thông tin lấy từ văn bản số hiệu nào (ví dụ: OG-HR-I056).
-        4. NẾU KHÔNG BIẾT: Nếu thông tin không có trong ngữ cảnh, hãy nói "Xin lỗi, tôi chưa tìm thấy thông tin chi tiết trong tài liệu hiện có."
-
-        Ngữ cảnh (Context):
+        Dựa trên ngữ cảnh sau:
         {context}
 
-        Câu hỏi của người dùng: {question}
+        Hãy trả lời câu hỏi: "{question}"
 
-        Câu trả lời chi tiết của HR:"""
+        YÊU CẦU VỀ ĐỊNH DẠNG (BẮT BUỘC):
+        1. **Tóm tắt cốt lõi:** Bắt đầu bằng 1 câu tóm tắt nội dung chính (TL;DR).
+        2. **Bảng so sánh/chi tiết:** Nếu dữ liệu có con số (lương, thưởng, ngày phép), HÃY VẼ BẢNG MARKDOWN.
+           - Ví dụ: | Đối tượng | Mức tiền | Điều kiện |
+        3. **Quy trình từng bước:** Nếu là hướng dẫn làm việc, hãy dùng danh sách số (1. -> 2. -> 3.).
+        4. **Lưu ý quan trọng:** Dùng định dạng trích dẫn (Blockquote >) cho các cảnh báo hoặc điều kiện loại trừ.
+        5. **Giọng văn:** Chuyên nghiệp nhưng gần gũi, khách quan, giống như một bản báo cáo phân tích.
+        6. Tùy từng nội dung cần thiết, có thể thể hiện bằng đồ họa cho trực quan.
+
+        TRẢ LỜI CỦA BẠN:"""
         
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
-
-        # Cấu hình retriever lấy nhiều dữ liệu hơn (k=10)
+        
+        # Nhớ giữ k=10 để có đủ dữ liệu phân tích
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 15})
         
-        # Đưa Prompt vào Chain
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
