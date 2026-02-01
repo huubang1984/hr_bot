@@ -63,7 +63,7 @@ class EnterpriseRAG:
         print(f"-> Tổng cộng đã tìm thấy {len(documents)} trang tài liệu.")
 
         # 2. Chia nhỏ văn bản (Split)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=2000)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=2000)
         texts = text_splitter.split_documents(documents)
 
         # 3. Tạo Vector Store
@@ -88,7 +88,12 @@ class EnterpriseRAG:
         self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
         
         # Dùng model Gemini 2.5 Flash như bạn đã cấu hình
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.1) # Giảm temp để AI trả lời chính xác, bớt sáng tạo
+        llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash", 
+                google_api_key=self.api_key, 
+                temperature=0.1,
+                max_output_tokens=8192
+            )
         
         # --- ĐÂY LÀ PHẦN SUPER PROMPT MỚI ---
         template = """Bạn là một trợ lý HR với kinh nghiệm của Chuyên gia Phân tích Dữ liệu HR (Data Analyst) tại Takagi Việt Nam.
@@ -113,7 +118,7 @@ class EnterpriseRAG:
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
         
         # Nhớ giữ k=10 để có đủ dữ liệu phân tích
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 15})
+        retriever = self.vector_store.as_retriever(search_kwargs={"k": 6})
         
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
