@@ -31,7 +31,7 @@ def ocr_with_gemini():
     print(f"🔍 Tìm thấy {len(pdf_files)} file scan. Bắt đầu xử lý với Gemini Vision...")
     
     # Model Gemini Flash hỗ trợ đọc tài liệu rất tốt và rẻ
-    model = genai.GenerativeModel("gemini-1.5-flash") 
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     for pdf_path in pdf_files:
         filename = os.path.basename(pdf_path)
