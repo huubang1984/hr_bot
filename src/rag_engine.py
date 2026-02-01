@@ -6,6 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 
 class EnterpriseRAG:
     def __init__(self, persist_directory="./chroma_db"):
@@ -62,7 +63,7 @@ class EnterpriseRAG:
         print(f"-> Tổng cộng đã tìm thấy {len(documents)} trang tài liệu.")
 
         # 2. Chia nhỏ văn bản (Split)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=2000)
         texts = text_splitter.split_documents(documents)
 
         # 3. Tạo Vector Store
@@ -85,11 +86,38 @@ class EnterpriseRAG:
             
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
         self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
-            
-        # Sử dụng Model mới nhất mà bạn có quyền truy cập
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.3)
         
+        # Dùng model Gemini 2.5 Flash như bạn đã cấu hình
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.1) # Giảm temp để AI trả lời chính xác, bớt sáng tạo
+        
+        # --- ĐÂY LÀ PHẦN SUPER PROMPT MỚI ---
+        template = """Bạn là Trợ lý HR (Nhân sự) chuyên nghiệp của Công ty TNHH Takagi Việt Nam.
+        Nhiệm vụ của bạn là trả lời câu hỏi dựa trên các đoạn văn bản được cung cấp dưới đây.
+
+        Quy tắc bắt buộc:
+        1. CHÍNH XÁC TUYỆT ĐỐI: Chỉ trả lời dựa trên thông tin trong "Ngữ cảnh". Không được bịa đặt.
+        2. CHI TIẾT CON SỐ: Nếu câu hỏi về lương, thưởng, chế độ, bạn PHẢI trích dẫn chính xác số tiền (VNĐ), ngày tháng, và tỷ lệ %.
+        3. TRÍCH DẪN: Nếu có thể, hãy ghi rõ thông tin lấy từ văn bản số hiệu nào (ví dụ: OG-HR-I056).
+        4. NẾU KHÔNG BIẾT: Nếu thông tin không có trong ngữ cảnh, hãy nói "Xin lỗi, tôi chưa tìm thấy thông tin chi tiết trong tài liệu hiện có."
+
+        Ngữ cảnh (Context):
+        {context}
+
+        Câu hỏi của người dùng: {question}
+
+        Câu trả lời chi tiết của HR:"""
+        
+        QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
+
+        # Cấu hình retriever lấy nhiều dữ liệu hơn (k=10)
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 15})
-        qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+        
+        # Đưa Prompt vào Chain
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=retriever,
+            chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
+        )
         
         return qa_chain.invoke(query)["result"]
