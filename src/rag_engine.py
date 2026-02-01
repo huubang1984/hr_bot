@@ -89,7 +89,7 @@ class EnterpriseRAG:
         
         # Dùng model Gemini 2.5 Flash như bạn đã cấu hình
         llm = ChatGoogleGenerativeAI(
-                model="gemini-3.0 pro ", 
+                model="gemini-3-pro-preview", 
                 google_api_key=self.api_key, 
                 temperature=0.1,
                 max_output_tokens=8192
