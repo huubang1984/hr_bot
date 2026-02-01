@@ -89,7 +89,7 @@ class EnterpriseRAG:
         # Sử dụng Model mới nhất mà bạn có quyền truy cập
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.3)
         
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
+        retriever = self.vector_store.as_retriever(search_kwargs={"k": 15})
         qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
         
         return qa_chain.invoke(query)["result"]
