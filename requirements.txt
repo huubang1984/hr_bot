@@ -11,3 +11,6 @@ tiktoken>=0.7.0
 # THÊM 2 DÒNG NÀY ĐỂ ĐỌC PDF VÀ WORD
 pypdf
 docx2txt
+fastapi
+uvicorn
+pydantic
