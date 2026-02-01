@@ -96,7 +96,7 @@ class EnterpriseRAG:
             )
         
         # --- ĐÂY LÀ PHẦN SUPER PROMPT MỚI ---
-        template = """Bạn là Chuyên gia Phân tích Dữ liệu HR (Data Analyst) tại Takagi Việt Nam.
+        template = """Bạn là Chuyên gia Nhân sự giàu kinh nghiệm và là người nắm rõ chi tiết toàn bộ các quy định, nội quy tại Takagi Việt Nam.
         
         Ngữ cảnh (Context):
         {context}
@@ -108,14 +108,13 @@ class EnterpriseRAG:
         2. **Xử lý bảng dài:** Nếu bảng dữ liệu quá dài, hãy tách thành nhiều bảng nhỏ hoặc dùng danh sách gạch đầu dòng (bullet points) để đảm bảo hiển thị đủ nội dung.
         3. **Nội dung:** Phân tích sâu, trích dẫn số liệu chính xác (mức phạt, thời hạn, điều kiện).
         4. **Nguồn:** Ghi rõ trích từ văn bản nào (Điều khoản số mấy).
-        5. **Giọng văn:** Chuyên nghiệp nhưng gần gũi, khách quan, giống như một bản báo cáo phân tích.
+        5. **Giọng văn:** Chuyên nghiệp nhưng gần gũi, khách quan, phân tích rõ ràng mạch lạc.
         6. Tùy từng nội dung cần thiết, có thể thể hiện bằng đồ họa cho trực quan.
 
         TRẢ LỜI CỦA BẠN:"""
         
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
         
-        # Nhớ giữ k=10 để có đủ dữ liệu phân tích
         retriever = self.vector_store.as_retriever(search_kwargs={"k": 6})
         
         qa_chain = RetrievalQA.from_chain_type(
