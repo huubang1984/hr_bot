@@ -89,27 +89,25 @@ class EnterpriseRAG:
         
         # Dùng model Gemini 2.5 Flash như bạn đã cấu hình
         llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash", 
+                model="gemini-3.0 pro ", 
                 google_api_key=self.api_key, 
                 temperature=0.1,
                 max_output_tokens=8192
             )
         
         # --- ĐÂY LÀ PHẦN SUPER PROMPT MỚI ---
-        template = """Bạn là một trợ lý HR với kinh nghiệm của Chuyên gia Phân tích Dữ liệu HR (Data Analyst) tại Takagi Việt Nam.
-        Nhiệm vụ của bạn là chuyển hóa các văn bản quy định khô khan thành thông tin trực quan, dễ hiểu cho nhân viên.
-
-        Dựa trên ngữ cảnh sau:
+        template = """Bạn là Chuyên gia Phân tích Dữ liệu HR (Data Analyst) tại Takagi Việt Nam.
+        
+        Ngữ cảnh (Context):
         {context}
 
-        Hãy trả lời câu hỏi: "{question}"
+        Câu hỏi: "{question}"
 
-        YÊU CẦU VỀ ĐỊNH DẠNG (BẮT BUỘC):
-        1. **Tóm tắt cốt lõi:** Bắt đầu bằng 1 câu tóm tắt nội dung chính (TL;DR).
-        2. **Bảng so sánh/chi tiết:** Nếu dữ liệu có con số (lương, thưởng, ngày phép), HÃY VẼ BẢNG MARKDOWN.
-           - Ví dụ: | Đối tượng | Mức tiền | Điều kiện |
-        3. **Quy trình từng bước:** Nếu là hướng dẫn làm việc, hãy dùng danh sách số (1. -> 2. -> 3.).
-        4. **Lưu ý quan trọng:** Dùng định dạng trích dẫn (Blockquote >) cho các cảnh báo hoặc điều kiện loại trừ.
+        YÊU CẦU QUAN TRỌNG:
+        1. **Ưu tiên sự trọn vẹn:** Phải trả lời hết ý, không được dừng giữa chừng.
+        2. **Xử lý bảng dài:** Nếu bảng dữ liệu quá dài, hãy tách thành nhiều bảng nhỏ hoặc dùng danh sách gạch đầu dòng (bullet points) để đảm bảo hiển thị đủ nội dung.
+        3. **Nội dung:** Phân tích sâu, trích dẫn số liệu chính xác (mức phạt, thời hạn, điều kiện).
+        4. **Nguồn:** Ghi rõ trích từ văn bản nào (Điều khoản số mấy).
         5. **Giọng văn:** Chuyên nghiệp nhưng gần gũi, khách quan, giống như một bản báo cáo phân tích.
         6. Tùy từng nội dung cần thiết, có thể thể hiện bằng đồ họa cho trực quan.
 
