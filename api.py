@@ -46,3 +46,20 @@ async def reindex_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 # Chạy server: uvicorn api:app --reload --port 8000
+
+class N8NRequest(BaseModel):
+    question: str
+    api_key: str = None
+    category: str = None  # Thêm trường này (Ví dụ: "HR", "IT", hoặc để trống)
+
+@app.post("/chat")
+async def chat(request: N8NRequest):
+    try:
+        if request.api_key:
+            rag.api_key = request.api_key
+        
+        # Truyền category vào hàm xử lý
+        response = rag.retrieve_answer(request.question, category=request.category)
+        return {"answer": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

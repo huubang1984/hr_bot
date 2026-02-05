@@ -14,61 +14,72 @@ class EnterpriseRAG:
         # BẢO MẬT 1: Lấy Key từ biến môi trường (An toàn hơn hard-code)
         self.api_key = os.getenv("GOOGLE_API_KEY")
 
-    def index_knowledge_base(self):
-        # 1. Dọn dẹp bộ nhớ cũ để tránh dữ liệu rác
+   def index_knowledge_base(self):
+        # 1. Xóa DB cũ
         if os.path.exists(self.persist_directory):
-            try:
-                shutil.rmtree(self.persist_directory)
-            except:
-                pass
+            try: shutil.rmtree(self.persist_directory)
+            except: pass
 
-        if not os.path.exists("data"):
-            os.makedirs("data")
-            return "Thư mục 'data' trống."
+        if not os.path.exists("data"): return "Thư mục 'data' trống."
 
-        documents = []
-        print("--- Đang quét tài liệu ---")
+        all_documents = []
+        print("--- Đang quét và phân loại tài liệu ---")
 
-        # Load dữ liệu (TXT, PDF, WORD)
-        try:
-            txt_loader = DirectoryLoader('./data', glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'}, silent_errors=True)
-            documents.extend(txt_loader.load())
-        except Exception: pass
+        # 2. Quét từng thư mục con để gắn thẻ (Metadata)
+        # Duyệt qua các folder con trong 'data': HR, IT, Production...
+        for category in os.listdir("data"):
+            category_path = os.path.join("data", category)
+            
+            # Chỉ xử lý nếu là thư mục
+            if os.path.isdir(category_path):
+                print(f"📂 Đang xử lý danh mục: {category}")
+                
+                docs = []
+                # Load TXT
+                try: docs.extend(DirectoryLoader(category_path, glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'}, silent_errors=True).load())
+                except: pass
+                # Load PDF
+                try: docs.extend(DirectoryLoader(category_path, glob="**/*.pdf", loader_cls=PyPDFLoader, silent_errors=True).load())
+                except: pass
+                # Load Word
+                try: docs.extend(DirectoryLoader(category_path, glob="**/*.docx", loader_cls=Docx2txtLoader, silent_errors=True).load())
+                except: pass
 
-        try:
-            pdf_loader = DirectoryLoader('./data', glob="**/*.pdf", loader_cls=PyPDFLoader, silent_errors=True)
-            documents.extend(pdf_loader.load())
-        except Exception: pass
+                # QUAN TRỌNG: Gắn thẻ category cho từng trang tài liệu
+                for doc in docs:
+                    doc.metadata["category"] = category  # Ví dụ: category = "HR"
+                
+                all_documents.extend(docs)
 
-        try:
-            word_loader = DirectoryLoader('./data', glob="**/*.docx", loader_cls=Docx2txtLoader, silent_errors=True)
-            documents.extend(word_loader.load())
-        except Exception: pass
-        
-        if not documents: return "Chưa có tài liệu nào trong thư mục data."
+        if not all_documents: return "Không tìm thấy tài liệu nào."
 
-        # 2. Cắt nhỏ văn bản (Tinh chỉnh để AI hiểu ngữ cảnh tốt hơn)
-        # chunk_size=2000: Đủ dài để nắm trọn ý một quy định
-        # chunk_overlap=200: Giữ mạch văn kết nối
+        # 3. Chia nhỏ văn bản
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-        texts = text_splitter.split_documents(documents)
+        texts = text_splitter.split_documents(all_documents)
 
-        # 3. Mã hóa dữ liệu (Embedding)
+        # 4. Tạo Vector Store với Metadata
         if self.api_key:
             embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
             try:
                 self.vector_store = Chroma.from_documents(documents=texts, embedding=embeddings, persist_directory=self.persist_directory)
-                return f"✅ Đã học xong {len(documents)} tài liệu. Sẵn sàng phục vụ!"
+                return f"✅ Đã học xong {len(all_documents)} tài liệu chia theo các danh mục."
             except Exception as e:
                 return f"❌ Lỗi Indexing: {str(e)}"
-        else:
-            return "Thiếu Google API Key."
+        return "Thiếu API Key."
 
-    def retrieve_answer(self, query):
+   # Thêm tham số category=None (Mặc định là tìm tất cả nếu không chỉ định)
+    def retrieve_answer(self, query, category=None):
         if not self.api_key: return "Chưa cấu hình API Key."
             
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
         self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
+        
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-pro",
+            google_api_key=self.api_key, 
+            temperature=0.3,
+            max_output_tokens=8192
+        )
         
         # --- CẤU HÌNH "TỰ NHIÊN & CÁ NHÂN HÓA" ---
         llm = ChatGoogleGenerativeAI(
@@ -105,8 +116,15 @@ class EnterpriseRAG:
         
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
         
-        # Lấy 6 đoạn văn bản liên quan nhất để phân tích
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 6})
+       # --- KỸ THUẬT FILTERING (LỌC) ---
+        search_kwargs = {"k": 6}
+        
+        # Nếu người dùng chỉ định tìm trong HR, chỉ tìm tài liệu có metadata category='HR'
+        if category and category != "All":
+            search_kwargs["filter"] = {"category": category}
+            print(f"🔍 Đang lọc tìm kiếm trong danh mục: {category}")
+
+        retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
         
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
