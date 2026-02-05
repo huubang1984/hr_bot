@@ -61,7 +61,7 @@ class EnterpriseRAG:
         self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
         
         llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro", 
+            model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
             temperature=0.3,        
             max_output_tokens=8192,
