@@ -1,12 +1,13 @@
 import os
 import shutil
 
-# --- CẤU HÌNH QUAN TRỌNG: ÉP DÙNG HTTP ĐỂ TRÁNH LỖI 0 ---
+# --- CẤU HÌNH: ÉP DÙNG HTTP (REST) ĐỂ TRÁNH LỖI KẾT NỐI ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 
 import google.generativeai as genai
-# Cấu hình thư viện Google chạy ở chế độ REST (HTTP) thay vì gRPC
+
+# Cấu hình thư viện Google chạy ở chế độ REST
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
@@ -22,13 +23,12 @@ class EnterpriseRAG:
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
         
-        # Sử dụng Model Embeddings 004 mới nhất
+        # SỬA LẠI: Dùng model cũ "embedding-001" nhưng chạy trên nền REST ổn định
         if self.api_key:
             self.embedding_model = GoogleGenerativeAIEmbeddings(
-                model="models/text-embedding-004", 
+                model="models/embedding-001",  # <--- Quay về model này
                 google_api_key=self.api_key,
-                # Thêm tham số này để LangChain cũng dùng REST
-                transport="rest" 
+                transport="rest"               # <--- Giữ nguyên cái này
             )
         else:
             self.embedding_model = None
@@ -46,7 +46,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING (REST MODE) ---")
+        print("--- 🚀 START INDEXING (MODEL 001 + REST) ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -78,10 +78,9 @@ class EnterpriseRAG:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu."
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (Model 001)."
         except Exception as e:
-            # In lỗi chi tiết hơn
-            return f"❌ Lỗi Indexing: {type(e).__name__} - {str(e)}"
+            return f"❌ Lỗi Indexing: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
@@ -92,7 +91,7 @@ class EnterpriseRAG:
             embedding_function=self.embedding_model
         )
         
-        # Model Chat (Cũng ép dùng REST)
+        # Model Chat (Vẫn dùng Flash vì nó chạy tốt)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -108,9 +107,8 @@ class EnterpriseRAG:
             retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
             relevant_docs = retriever.invoke(query)
             
-            # Kiểm tra nếu không tìm thấy gì (DB rỗng)
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu. Vui lòng chạy Re-index trước."
+                return "Hệ thống chưa có dữ liệu. Vui lòng kiểm tra lại tài liệu."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
@@ -136,7 +134,7 @@ class EnterpriseRAG:
         CÂU HỎI: "{query}"
         
         YÊU CẦU:
-        1. Trả lời ngắn gọn dựa trên dữ liệu tra cứu.
+        1. Trả lời dựa trên dữ liệu tra cứu.
         2. Nếu không có thông tin, nói "Xin lỗi, không tìm thấy trong tài liệu".
         3. Ghi nguồn ở cuối câu trả lời.
         
