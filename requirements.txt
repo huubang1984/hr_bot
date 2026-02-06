@@ -5,12 +5,11 @@ python-dotenv
 langchain
 langchain-core
 langchain-community
-# Cập nhật bản mới nhất để nhận diện model text-embedding-004
-langchain-google-genai>=1.0.3
+langchain-google-genai
 langchain-chroma
 langchain-text-splitters
 chromadb
 slowapi
 pypdf
 docx2txt
-google-generativeai>=0.5.2
+huggingface_hub

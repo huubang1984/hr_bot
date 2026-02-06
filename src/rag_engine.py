@@ -1,42 +1,43 @@
 import os
 import shutil
+import time
 
-# --- CẤU HÌNH: ÉP DÙNG HTTP (REST) ĐỂ TRÁNH LỖI MẠNG ---
+# --- CẤU HÌNH GOOGLE CHAT ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
-
 import google.generativeai as genai
-
-# Cấu hình thư viện Google chạy ở chế độ REST
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+# Dùng API HuggingFace (Không tốn RAM)
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+from langchain_core.prompts import PromptTemplate
 
 class EnterpriseRAG:
     def __init__(self, persist_directory="./chroma_db"):
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
+        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
-        # SỬ DỤNG MODEL CHUẨN: text-embedding-004
-        # (Yêu cầu: API Key phải được tạo mới tại aistudio.google.com)
-        if self.api_key:
-            self.embedding_model = GoogleGenerativeAIEmbeddings(
-                model="models/text-embedding-004", 
-                google_api_key=self.api_key,
-                transport="rest"
+        # Cấu hình Embeddings qua API (Serverless)
+        # Model này rất phổ biến, luôn có sẵn trên Cache của HuggingFace nên chạy rất nhanh
+        if self.hf_token:
+            self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
+                api_key=self.hf_token,
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
         else:
             self.embedding_model = None
 
     def index_knowledge_base(self):
-        if not self.api_key: return "❌ Lỗi: Chưa có GOOGLE_API_KEY."
+        if not self.hf_token: return "❌ Lỗi: Thiếu HUGGINGFACEHUB_API_TOKEN trong Environment."
 
-        # 1. Dọn dẹp DB cũ
+        # 1. Dọn dẹp DB cũ (Bắt buộc vì đổi model Embedding)
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
             except: pass
@@ -46,7 +47,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING (GOOGLE 004 REST) ---")
+        print("--- 🚀 START INDEXING VIA HUGGINGFACE API ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -78,12 +79,13 @@ class EnterpriseRAG:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu."
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (HuggingFace Cloud)."
         except Exception as e:
             return f"❌ Lỗi Indexing: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
-        if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
+        if not self.api_key: return "Lỗi: Chưa cấu hình API Key Google."
+        if not self.embedding_model: return "Lỗi: Chưa cấu hình HuggingFace Token."
             
         # Khởi tạo lại kết nối DB
         self.vector_store = Chroma(
@@ -91,7 +93,7 @@ class EnterpriseRAG:
             embedding_function=self.embedding_model
         )
         
-        # Model Chat
+        # Model Chat (Google Gemini)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
