@@ -1,10 +1,11 @@
-import os
+mport os
 import shutil
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.chains import RetrievalQA
+from langchain_google_genai import ChatGoogleGenerativeAI
+# Thay đổi quan trọng: Dùng HuggingFace (Local) thay vì Google API cho Embeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.prompts import PromptTemplate
 
 class EnterpriseRAG:
@@ -12,20 +13,25 @@ class EnterpriseRAG:
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
+        
+        # SỬ DỤNG LOCAL EMBEDDINGS (Miễn phí, Ổn định)
+        # Model 'all-MiniLM-L6-v2' rất nhẹ và hiệu quả
+        self.embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
     def index_knowledge_base(self):
-        # 1. Dọn dẹp & Chuẩn bị
+        # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
             except: pass
+
         if not os.path.exists("data"):
             os.makedirs("data")
             return "Folder data created. Please upload files."
             
         all_documents = []
-        print("--- 🚀 START INDEXING ---")
+        print("--- 🚀 START INDEXING WITH LOCAL EMBEDDINGS ---")
         
-        # 2. Quét tài liệu & Gắn metadata
+        # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
             category = os.path.basename(root) if root != "data" else "General"
             docs = []
@@ -36,60 +42,61 @@ class EnterpriseRAG:
             try: docs.extend(DirectoryLoader(root, glob="*.docx", loader_cls=Docx2txtLoader, silent_errors=True).load())
             except: pass
             
-            # Gắn tên file vào metadata để AI biết nguồn
             for doc in docs: 
                 doc.metadata["category"] = category
-                # Lưu tên file gốc (ví dụ: Noi_quy_2025.pdf)
-                doc.metadata["source"] = os.path.basename(doc.metadata.get("source", ""))
+                file_name = os.path.basename(doc.metadata.get("source", ""))
+                doc.metadata["source_name"] = file_name
             
             all_documents.extend(docs)
 
-        if not all_documents: return "No documents found to index."
+        if not all_documents: return "No documents found."
         
-        # 3. Cắt nhỏ (Chunking)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+        # 3. Cắt nhỏ văn bản
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         texts = text_splitter.split_documents(all_documents)
 
-        # 4. Lưu vào Vector DB
-        if self.api_key:
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
-            self.vector_store = Chroma.from_documents(documents=texts, embedding=embeddings, persist_directory=self.persist_directory)
-            return f"✅ Indexed {len(all_documents)} files ({len(texts)} chunks)."
-        return "Missing API Key."
+        # 4. Lưu vào Vector DB (Dùng Local Embeddings)
+        try:
+            self.vector_store = Chroma.from_documents(
+                documents=texts, 
+                embedding=self.embedding_model, # Dùng model nội bộ
+                persist_directory=self.persist_directory
+            )
+            return f"✅ Đã học xong {len(all_documents)} tài liệu bằng Local Embeddings."
+        except Exception as e:
+            return f"❌ Lỗi Indexing: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
-        if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
+        if not self.api_key: return "Lỗi: Chưa cấu hình API Key cho Chat."
             
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
-        self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
+        # Dùng Local Embeddings để tìm kiếm
+        self.vector_store = Chroma(
+            persist_directory=self.persist_directory, 
+            embedding_function=self.embedding_model
+        )
         
-        # Model Flash cho tốc độ nhanh và ổn định
+        # Dùng Google Gemini để TRẢ LỜI (Phần này vẫn cần API Key, và nó đang hoạt động tốt)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
-            temperature=0.2, 
-            max_output_tokens=8192,
-timeout=None,
-max_retries=2
+            temperature=0.1,
+            max_output_tokens=8192
         )
         
-        # --- KỸ THUẬT NHỒI NGUỒN (CONTEXT INJECTION) ---
-        # Thay vì để LangChain tự làm, ta tự tìm kiếm và format dữ liệu đầu vào
+        # --- TÌM KIẾM DỮ LIỆU ---
         search_kwargs = {"k": 5}
         if category: search_kwargs["filter"] = {"category": category}
-        
-        # 1. Tìm 5 đoạn văn bản liên quan nhất
-        retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
-        docs = retriever.invoke(query)
-        
-        # 2. Ghép nội dung + Tên nguồn vào Context
-        context_text = ""
-        for doc in docs:
-            source_name = doc.metadata.get("source", "Tài liệu nội bộ")
-            content = doc.page_content.replace("\n", " ")
-            context_text += f"- Trích từ tài liệu [{source_name}]: {content}\n\n"
 
-        # 3. Xử lý lịch sử chat
+        retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
+        relevant_docs = retriever.invoke(query)
+        
+        # Xây dựng Context
+        formatted_context = ""
+        for i, doc in enumerate(relevant_docs):
+            source = doc.metadata.get("source_name", "Tài liệu nội bộ")
+            content = doc.page_content.replace("\n", " ")
+            formatted_context += f"[Nguồn {i+1}: {source}]\nNội dung: {content}\n\n"
+
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
         # --- PROMPT KỶ LUẬT THÉP ---
