@@ -4,18 +4,19 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader, Py
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Dùng API của HuggingFace (Chạy trên mây, không tốn RAM server)
+# Dùng API HuggingFace để mã hóa (Không tốn RAM server)
 from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings 
-from langchain.prompts import PromptTemplate
+# --- SỬA LỖI QUAN TRỌNG: Import từ langchain_core thay vì langchain ---
+from langchain_core.prompts import PromptTemplate
 
 class EnterpriseRAG:
     def __init__(self, persist_directory="./chroma_db"):
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
-        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") # Cần thêm biến này trên Render
+        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
-        # Cấu hình Embeddings qua API (Siêu nhẹ cho server)
+        # Cấu hình Embeddings qua API
         self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
             api_key=self.hf_token,
             model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -105,6 +106,7 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
+        # Prompt
         prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam.
         
         DỮ LIỆU TRA CỨU:
@@ -116,17 +118,9 @@ class EnterpriseRAG:
         CÂU HỎI: "{query}"
         
         YÊU CẦU:
-        QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
-        1. **CHỈ SỬ DỤNG** thông tin trong phần "DỮ LIỆU TRA CỨU" bên dưới.
-        2. **KHÔNG** được tự bịa ra kiến thức bên ngoài (nếu không có trong tài liệu, hãy nói: "Xin lỗi, tôi chưa tìm thấy thông tin này trong tài liệu nội bộ").
-        3. **TRÍCH DẪN NGUỒN:** Cuối mỗi ý hoặc cuối câu trả lời, PHẢI ghi rõ thông tin lấy từ đâu.
-           - Ví dụ: "...theo quy định mới (Nguồn: Noi_quy_2025.pdf)".
-        4. Trình bày gạch đầu dòng, ngắn gọn, dễ đọc trên điện thoại.
-
-	QUY TẮC TRẢ LỜI (ZALO):
-	1. KHÔNG DÙNG BẢNG (No Tables). Dùng gạch đầu dòng.
-	2. Thân thiện, chính xác số liệu.
-	3. Kết hợp lịch sử chat để hiểu câu hỏi cộc lốc.
+        1. Trả lời dựa trên dữ liệu tra cứu.
+        2. Nếu không có thông tin, nói "Xin lỗi, không tìm thấy trong tài liệu".
+        3. Ghi nguồn ở cuối câu trả lời.
         
         TRẢ LỜI:"""
         
@@ -135,5 +129,3 @@ class EnterpriseRAG:
             return response.content
         except Exception as e:
             return f"Lỗi Gemini: {str(e)}"
-        
-        
