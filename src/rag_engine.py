@@ -52,7 +52,7 @@ class EnterpriseRAG:
 
         # 4. Lưu vào Vector DB
         if self.api_key:
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
+            embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
             self.vector_store = Chroma.from_documents(documents=texts, embedding=embeddings, persist_directory=self.persist_directory)
             return f"✅ Indexed {len(all_documents)} files ({len(texts)} chunks)."
         return "Missing API Key."
@@ -60,7 +60,7 @@ class EnterpriseRAG:
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
             
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
         self.vector_store = Chroma(persist_directory=self.persist_directory, embedding_function=embeddings)
         
         # Model Flash cho tốc độ nhanh và ổn định
