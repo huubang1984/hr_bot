@@ -15,3 +15,5 @@ fastapi
 uvicorn
 pydantic
 slowapi
+langchain-huggingface
+sentence-transformers
