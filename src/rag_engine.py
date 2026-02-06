@@ -1,4 +1,4 @@
-mport os
+import os
 import shutil
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -79,7 +79,7 @@ class EnterpriseRAG:
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
-            temperature=0.1,
+            temperature=0.2,
             max_output_tokens=8192
         )
         
@@ -111,25 +111,26 @@ class EnterpriseRAG:
            - Ví dụ: "...theo quy định mới (Nguồn: Noi_quy_2025.pdf)".
         4. Trình bày gạch đầu dòng, ngắn gọn, dễ đọc trên điện thoại.
 
-QUY TẮC TRẢ LỜI (ZALO):
-1. KHÔNG DÙNG BẢNG (No Tables). Dùng gạch đầu dòng.
-2. Thân thiện, chính xác số liệu.
-3. Kết hợp lịch sử chat để hiểu câu hỏi cộc lốc.
-
-        ---
+	QUY TẮC TRẢ LỜI (ZALO):
+	1. KHÔNG DÙNG BẢNG (No Tables). Dùng gạch đầu dòng.
+	2. Thân thiện, chính xác số liệu.
+	3. Kết hợp lịch sử chat để hiểu câu hỏi cộc lốc.
+        
+        ----------------
         LỊCH SỬ CHAT:
         {safe_history}
-        ---
-        DỮ LIỆU TRA CỨU (CONTEXT):
-        {context_text}
-        ---
-        CÂU HỎI CỦA NHÂN VIÊN: "{query}"
+        ----------------
+        DỮ LIỆU TRA CỨU:
+        {formatted_context}
+        ----------------
+        CÂU HỎI: "{query}"
         
         TRẢ LỜI:"""
         
-        # Gọi thẳng LLM (Bỏ qua Chain phức tạp để kiểm soát tốt hơn)
         try:
             response = llm.invoke(prompt)
             return response.content
         except Exception as e:
-            return f"Lỗi xử lý: {str(e)}"
+            return f"Lỗi hệ thống: {str(e)}"
+        
+       
