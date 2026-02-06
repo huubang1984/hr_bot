@@ -1,12 +1,19 @@
 import os
 import shutil
+
+# --- CẤU HÌNH QUAN TRỌNG: ÉP DÙNG HTTP ĐỂ TRÁNH LỖI 0 ---
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["GLOG_minloglevel"] = "2"
+
+import google.generativeai as genai
+# Cấu hình thư viện Google chạy ở chế độ REST (HTTP) thay vì gRPC
+if os.getenv("GOOGLE_API_KEY"):
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
+
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI
-# Dùng API HuggingFace để mã hóa (Không tốn RAM server)
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings 
-# --- SỬA LỖI QUAN TRỌNG: Import từ langchain_core thay vì langchain ---
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 
 class EnterpriseRAG:
@@ -14,15 +21,21 @@ class EnterpriseRAG:
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
-        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
-        # Cấu hình Embeddings qua API
-        self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
-            api_key=self.hf_token,
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
+        # Sử dụng Model Embeddings 004 mới nhất
+        if self.api_key:
+            self.embedding_model = GoogleGenerativeAIEmbeddings(
+                model="models/text-embedding-004", 
+                google_api_key=self.api_key,
+                # Thêm tham số này để LangChain cũng dùng REST
+                transport="rest" 
+            )
+        else:
+            self.embedding_model = None
 
     def index_knowledge_base(self):
+        if not self.api_key: return "❌ Lỗi: Chưa có GOOGLE_API_KEY."
+
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
@@ -33,7 +46,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING VIA HUGGINGFACE API ---")
+        print("--- 🚀 START INDEXING (REST MODE) ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -65,13 +78,13 @@ class EnterpriseRAG:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Đã học xong {len(all_documents)} tài liệu (Dùng HuggingFace API)."
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu."
         except Exception as e:
-            return f"❌ Lỗi Indexing: {str(e)}"
+            # In lỗi chi tiết hơn
+            return f"❌ Lỗi Indexing: {type(e).__name__} - {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
-        if not self.api_key: return "Lỗi: Chưa cấu hình API Key Google."
-        if not self.hf_token: return "Lỗi: Chưa cấu hình Token HuggingFace."
+        if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
             
         # Khởi tạo lại kết nối DB
         self.vector_store = Chroma(
@@ -79,12 +92,12 @@ class EnterpriseRAG:
             embedding_function=self.embedding_model
         )
         
-        # Dùng Google Gemini để trả lời
+        # Model Chat (Cũng ép dùng REST)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
-            temperature=0.2,
-            max_output_tokens=8192
+            temperature=0.1,
+            transport="rest"
         )
         
         # Tìm kiếm
@@ -94,6 +107,11 @@ class EnterpriseRAG:
         try:
             retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
             relevant_docs = retriever.invoke(query)
+            
+            # Kiểm tra nếu không tìm thấy gì (DB rỗng)
+            if not relevant_docs:
+                return "Hệ thống chưa có dữ liệu. Vui lòng chạy Re-index trước."
+                
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
         
@@ -118,7 +136,7 @@ class EnterpriseRAG:
         CÂU HỎI: "{query}"
         
         YÊU CẦU:
-        1. Trả lời dựa trên dữ liệu tra cứu.
+        1. Trả lời ngắn gọn dựa trên dữ liệu tra cứu.
         2. Nếu không có thông tin, nói "Xin lỗi, không tìm thấy trong tài liệu".
         3. Ghi nguồn ở cuối câu trả lời.
         
