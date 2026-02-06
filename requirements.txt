@@ -12,4 +12,4 @@ chromadb
 slowapi
 pypdf
 docx2txt
-huggingface_hub
+google-generativeai
