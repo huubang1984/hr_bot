@@ -1,20 +1,19 @@
 import os
 import shutil
 
-# --- CẤU HÌNH: ÉP DÙNG HTTP (REST) ĐỂ TRÁNH LỖI KẾT NỐI ---
+# --- CẤU HÌNH GOOGLE CHAT ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
-
 import google.generativeai as genai
-
-# Cấu hình thư viện Google chạy ở chế độ REST
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+# Sử dụng FastEmbed (Siêu nhẹ, không cần API Key, chạy Local)
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_core.prompts import PromptTemplate
 
 class EnterpriseRAG:
@@ -23,19 +22,13 @@ class EnterpriseRAG:
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
         
-        # SỬA LẠI: Dùng model cũ "embedding-001" nhưng chạy trên nền REST ổn định
-        if self.api_key:
-            self.embedding_model = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",  # <--- Quay về model này
-                google_api_key=self.api_key,
-                transport="rest"               # <--- Giữ nguyên cái này
-            )
-        else:
-            self.embedding_model = None
+        # CẤU HÌNH FASTEMBED (QUAN TRỌNG)
+        # Sử dụng model hỗ trợ đa ngôn ngữ (Tiếng Việt) và rất nhẹ
+        self.embedding_model = FastEmbedEmbeddings(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        )
 
     def index_knowledge_base(self):
-        if not self.api_key: return "❌ Lỗi: Chưa có GOOGLE_API_KEY."
-
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
@@ -46,7 +39,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING (MODEL 001 + REST) ---")
+        print("--- 🚀 START INDEXING WITH FASTEMBED ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -78,20 +71,20 @@ class EnterpriseRAG:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (Model 001)."
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (FastEmbed Local)."
         except Exception as e:
             return f"❌ Lỗi Indexing: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
-        if not self.api_key: return "Lỗi: Chưa cấu hình API Key."
+        if not self.api_key: return "Lỗi: Chưa cấu hình API Key Google Chat."
             
-        # Khởi tạo lại kết nối DB
+        # Kết nối lại DB với cùng model FastEmbed
         self.vector_store = Chroma(
             persist_directory=self.persist_directory, 
             embedding_function=self.embedding_model
         )
         
-        # Model Chat (Vẫn dùng Flash vì nó chạy tốt)
+        # Model Chat (Vẫn dùng Google Gemini Flash)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -108,7 +101,7 @@ class EnterpriseRAG:
             relevant_docs = retriever.invoke(query)
             
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu. Vui lòng kiểm tra lại tài liệu."
+                return "Hệ thống chưa có dữ liệu hoặc câu hỏi không liên quan."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"

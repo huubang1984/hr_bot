@@ -13,3 +13,5 @@ slowapi
 pypdf
 docx2txt
 google-generativeai
+# --- THƯ VIỆN MỚI SIÊU NHẸ ---
+fastembed
