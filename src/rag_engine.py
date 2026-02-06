@@ -4,8 +4,8 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader, Py
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Thay đổi quan trọng: Dùng HuggingFace (Local) thay vì Google API cho Embeddings
-from langchain_huggingface import HuggingFaceEmbeddings
+# Dùng API của HuggingFace (Chạy trên mây, không tốn RAM server)
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings 
 from langchain.prompts import PromptTemplate
 
 class EnterpriseRAG:
@@ -13,10 +13,13 @@ class EnterpriseRAG:
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
+        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") # Cần thêm biến này trên Render
         
-        # SỬ DỤNG LOCAL EMBEDDINGS (Miễn phí, Ổn định)
-        # Model 'all-MiniLM-L6-v2' rất nhẹ và hiệu quả
-        self.embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        # Cấu hình Embeddings qua API (Siêu nhẹ cho server)
+        self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
+            api_key=self.hf_token,
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
 
     def index_knowledge_base(self):
         # 1. Dọn dẹp DB cũ
@@ -26,10 +29,10 @@ class EnterpriseRAG:
 
         if not os.path.exists("data"):
             os.makedirs("data")
-            return "Folder data created. Please upload files."
+            return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING WITH LOCAL EMBEDDINGS ---")
+        print("--- 🚀 START INDEXING VIA HUGGINGFACE API ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -44,8 +47,7 @@ class EnterpriseRAG:
             
             for doc in docs: 
                 doc.metadata["category"] = category
-                file_name = os.path.basename(doc.metadata.get("source", ""))
-                doc.metadata["source_name"] = file_name
+                doc.metadata["source_name"] = os.path.basename(doc.metadata.get("source", ""))
             
             all_documents.extend(docs)
 
@@ -55,27 +57,28 @@ class EnterpriseRAG:
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         texts = text_splitter.split_documents(all_documents)
 
-        # 4. Lưu vào Vector DB (Dùng Local Embeddings)
+        # 4. Lưu vào Vector DB
         try:
             self.vector_store = Chroma.from_documents(
                 documents=texts, 
-                embedding=self.embedding_model, # Dùng model nội bộ
+                embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Đã học xong {len(all_documents)} tài liệu bằng Local Embeddings."
+            return f"✅ Đã học xong {len(all_documents)} tài liệu (Dùng HuggingFace API)."
         except Exception as e:
             return f"❌ Lỗi Indexing: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
-        if not self.api_key: return "Lỗi: Chưa cấu hình API Key cho Chat."
+        if not self.api_key: return "Lỗi: Chưa cấu hình API Key Google."
+        if not self.hf_token: return "Lỗi: Chưa cấu hình Token HuggingFace."
             
-        # Dùng Local Embeddings để tìm kiếm
+        # Khởi tạo lại kết nối DB
         self.vector_store = Chroma(
             persist_directory=self.persist_directory, 
             embedding_function=self.embedding_model
         )
         
-        # Dùng Google Gemini để TRẢ LỜI (Phần này vẫn cần API Key, và nó đang hoạt động tốt)
+        # Dùng Google Gemini để trả lời
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -83,12 +86,15 @@ class EnterpriseRAG:
             max_output_tokens=8192
         )
         
-        # --- TÌM KIẾM DỮ LIỆU ---
+        # Tìm kiếm
         search_kwargs = {"k": 5}
         if category: search_kwargs["filter"] = {"category": category}
 
-        retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
-        relevant_docs = retriever.invoke(query)
+        try:
+            retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
+            relevant_docs = retriever.invoke(query)
+        except Exception as e:
+            return f"Lỗi truy vấn DB: {str(e)}"
         
         # Xây dựng Context
         formatted_context = ""
@@ -99,11 +105,17 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        # --- PROMPT KỶ LUẬT THÉP ---
-        prompt = f"""Bạn là Trợ lý HR chuyên nghiệp và tận tâm của Takagi Việt Nam.
+        prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam.
         
-        NHIỆM VỤ: Trả lời câu hỏi dựa trên thông tin được cung cấp dưới đây.
+        DỮ LIỆU TRA CỨU:
+        {formatted_context}
+        ----------------
+        LỊCH SỬ CHAT:
+        {safe_history}
+        ----------------
+        CÂU HỎI: "{query}"
         
+        YÊU CẦU:
         QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
         1. **CHỈ SỬ DỤNG** thông tin trong phần "DỮ LIỆU TRA CỨU" bên dưới.
         2. **KHÔNG** được tự bịa ra kiến thức bên ngoài (nếu không có trong tài liệu, hãy nói: "Xin lỗi, tôi chưa tìm thấy thông tin này trong tài liệu nội bộ").
@@ -116,21 +128,12 @@ class EnterpriseRAG:
 	2. Thân thiện, chính xác số liệu.
 	3. Kết hợp lịch sử chat để hiểu câu hỏi cộc lốc.
         
-        ----------------
-        LỊCH SỬ CHAT:
-        {safe_history}
-        ----------------
-        DỮ LIỆU TRA CỨU:
-        {formatted_context}
-        ----------------
-        CÂU HỎI: "{query}"
-        
         TRẢ LỜI:"""
         
         try:
             response = llm.invoke(prompt)
             return response.content
         except Exception as e:
-            return f"Lỗi hệ thống: {str(e)}"
+            return f"Lỗi Gemini: {str(e)}"
         
-       
+        
