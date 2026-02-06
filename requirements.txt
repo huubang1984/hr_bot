@@ -2,9 +2,10 @@ fastapi
 uvicorn
 pydantic
 python-dotenv
+langchain
+langchain-community
 langchain-google-genai
 langchain-chroma
-langchain-community
 langchain-text-splitters
 chromadb
 slowapi
