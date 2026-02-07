@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+import gc
 
 # --- CẤU HÌNH GOOGLE CHAT (REST) ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -34,20 +35,19 @@ class EnterpriseRAG:
         else:
             self.embedding_model = None
 
-def index_knowledge_base(self):
+    def index_knowledge_base(self):
         if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY."
 
-        # --- ĐOẠN CODE MỚI QUAN TRỌNG: GIẢI PHÓNG DB CŨ ---
-        # Ngắt kết nối Chroma hiện tại để tránh lỗi "Readonly database"
+        # --- FIX LỖI READONLY DATABASE ---
+        # Ngắt kết nối và giải phóng bộ nhớ trước khi xóa
         self.vector_store = None
-        import gc
         gc.collect()
-        # --------------------------------------------------
+        # --------------------------------
 
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
-            except: pass # Nếu vẫn không xóa được thì bỏ qua, Chroma sẽ tự xử lý ghi đè
+            except: pass 
 
         if not os.path.exists("data"):
             os.makedirs("data")
@@ -110,7 +110,7 @@ def index_knowledge_base(self):
             embedding_function=self.embedding_model
         )
         
-        # Model Chat (Google Gemini) - Tăng temp lên xíu cho tự nhiên
+        # Model Chat (Google Gemini)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -118,7 +118,7 @@ def index_knowledge_base(self):
             transport="rest"
         )
         
-        # --- LOGIC TÌM KIẾM THÔNG MINH HƠN ---
+        # --- LOGIC TÌM KIẾM THÔNG MINH ---
         relevant_docs = []
         try:
             # 1. Thử tìm với category (nếu có)
@@ -128,12 +128,11 @@ def index_knowledge_base(self):
                 )
                 relevant_docs = retriever.invoke(query)
             
-            # 2. Nếu không tìm thấy hoặc không có category, tìm toàn bộ DB
+            # 2. Nếu không tìm thấy, tìm toàn bộ
             if not relevant_docs:
                 retriever_all = self.vector_store.as_retriever(search_kwargs={"k": 5})
                 relevant_docs = retriever_all.invoke(query)
                 
-            # Nếu vẫn không có -> Hệ thống thực sự rỗng hoặc chưa Re-index
             if not relevant_docs:
                 return "Dạ, hiện tại em chưa tìm thấy thông tin này trong hệ thống dữ liệu. Anh/chị kiểm tra lại xem đã cập nhật tài liệu (Re-index) chưa ạ?"
                 
@@ -142,21 +141,19 @@ def index_knowledge_base(self):
         
         # Xây dựng Context
         formatted_context = ""
-        unique_sources = set()
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
-            unique_sources.add(source)
             content = doc.page_content.replace("\n", " ")
             formatted_context += f"[Nguồn {i+1}: {source}]\nNội dung: {content}\n\n"
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        # --- PROMPT MỚI (CHUẨN PERSONA & TẬN TÂM) ---
+        # --- PROMPT ---
         prompt = f"""
         VAI TRÒ:
         Bạn là Trợ lý HR ảo của công ty Takagi Việt Nam. Tên bạn là "Trợ lý HR".
         Bạn xưng hô là "em" và gọi người dùng là "anh/chị".
-        Tính cách: Tận tâm, nhẹ nhàng, chuyên nghiệp nhưng gần gũi, luôn muốn giúp đỡ nhân viên.
+        Tính cách: Tận tâm, nhẹ nhàng, chuyên nghiệp nhưng gần gũi.
 
         NHIỆM VỤ:
         Trả lời câu hỏi của nhân viên dựa trên DỮ LIỆU ĐƯỢC CUNG CẤP dưới đây.
@@ -173,9 +170,7 @@ def index_knowledge_base(self):
         1. **Trung thực với dữ liệu:** Chỉ trả lời dựa trên thông tin trong phần "DỮ LIỆU TRA CỨU".
         2. **Xử lý khi thiếu tin:** Nếu dữ liệu không chứa câu trả lời, hãy nói: "Dạ, vấn đề này em tìm trong tài liệu nội bộ chưa thấy đề cập. Anh/chị liên hệ trực tiếp phòng Nhân sự để được hỗ trợ chính xác nhất nhé ạ."
         3. **Trích dẫn nguồn:** Cuối câu trả lời, hãy ghi chú nguồn tài liệu tham khảo. Ví dụ: (Theo: Noi_quy_cong_ty.pdf).
-        4. **Phong cách:** - Bắt đầu bằng lời chào nhẹ nhàng nếu cần.
-           - Giải thích rõ ràng, dễ hiểu.
-           - **QUAN TRỌNG:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời để hỗ trợ nhân viên tốt nhất (Ví dụ: "Anh/chị nhớ nộp đơn trước ngày 5 nhé", "Nếu cần mẫu đơn, anh/chị bảo em nha").
+        4. **Phong cách:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời để hỗ trợ nhân viên tốt nhất.
 
         BẮT ĐẦU TRẢ LỜI:
         """
