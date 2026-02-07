@@ -113,16 +113,18 @@ class EnterpriseRAG:
             pinecone_api_key=self.pinecone_api_key
         )
         
+        # --- CẬP NHẬT: TĂNG GIỚI HẠN TOKEN ---
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
             temperature=0.3, 
-            transport="rest"
+            transport="rest",
+            max_output_tokens=8192  # <--- Tăng lên 8192 để không bị cắt chữ
         )
         
         relevant_docs = []
         try:
-            # 1. Tìm kiếm (Logic cũ)
+            # 1. Tìm kiếm
             if category and category != "General":
                 retriever = vector_store.as_retriever(
                     search_kwargs={"k": 5, "filter": {"category": category}}
@@ -147,15 +149,11 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
+        # --- CẬP NHẬT PROMPT: Yêu cầu trả lời gọn và đầy đủ ---
         prompt = f"""
         VAI TRÒ:
         Bạn là Trợ lý HR ảo của công ty Takagi Việt Nam. Tên bạn là "Trợ lý HR".
-        Bạn xưng hô là "em" và gọi người dùng là "anh/chị".
-        Tính cách: Tận tâm, nhẹ nhàng, chuyên nghiệp nhưng gần gũi.
-
-        NHIỆM VỤ:
-        Trả lời câu hỏi của nhân viên dựa trên DỮ LIỆU ĐƯỢC CUNG CẤP dưới đây.
-
+        
         DỮ LIỆU TRA CỨU:
         {formatted_context}
 
@@ -165,12 +163,12 @@ class EnterpriseRAG:
         CÂU HỎI MỚI: "{query}"
 
         YÊU CẦU TRẢ LỜI:
-        1. **Trung thực với dữ liệu:** Chỉ trả lời dựa trên thông tin trong phần "DỮ LIỆU TRA CỨU".
-        2. **Xử lý khi thiếu tin:** Nếu dữ liệu không chứa câu trả lời, hãy nói: "Dạ, vấn đề này em tìm trong tài liệu nội bộ chưa thấy đề cập. Anh/chị liên hệ trực tiếp phòng Nhân sự để được hỗ trợ chính xác nhất nhé ạ."
-        3. **Trích dẫn nguồn:** Cuối câu trả lời, hãy ghi chú nguồn tài liệu tham khảo. Ví dụ: (Theo: Noi_quy_cong_ty.pdf).
-        4. **Phong cách:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời.
+        1. **Đầy đủ ý:** Đảm bảo câu trả lời không bị cắt giữa chừng. Nếu nội dung quá dài, hãy tóm tắt lại các ý chính quan trọng nhất.
+        2. **Dễ đọc:** Sử dụng gạch đầu dòng ngắn gọn. Tránh viết đoạn văn quá dài gây khó đọc trên điện thoại.
+        3. **Nguồn:** Ghi rõ nguồn tài liệu (Ví dụ: Theo Quy định nghỉ phép.pdf).
+        4. **Tận tâm:** Luôn kết thúc bằng một lời đề nghị hỗ trợ tiếp.
 
-        BẮT ĐẦU TRẢ LỜI:
+        TRẢ LỜI:
         """
         
         try:
