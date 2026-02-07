@@ -106,25 +106,22 @@ class EnterpriseRAG:
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
         if not self.index_name: return "Lỗi: Chưa cấu hình Pinecone Index."
         
-        # Kết nối Vector Store từ Cloud
         vector_store = PineconeVectorStore(
             index_name=self.index_name,
             embedding=self.embedding_model,
             pinecone_api_key=self.pinecone_api_key
         )
         
-        # --- CẬP NHẬT: TĂNG GIỚI HẠN TOKEN ---
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
             temperature=0.3, 
             transport="rest",
-            max_output_tokens=8192  # <--- Tăng lên 8192 để không bị cắt chữ
+            max_output_tokens=8192 
         )
         
         relevant_docs = []
         try:
-            # 1. Tìm kiếm
             if category and category != "General":
                 retriever = vector_store.as_retriever(
                     search_kwargs={"k": 5, "filter": {"category": category}}
@@ -141,11 +138,13 @@ class EnterpriseRAG:
         except Exception as e:
             return f"Lỗi truy vấn Pinecone: {str(e)}"
         
+        # --- SỬA ĐỔI 1: CÁCH FORMAT DỮ LIỆU ĐỂ AI ĐỌC TÊN FILE ---
         formatted_context = ""
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
             content = doc.page_content.replace("\n", " ")
-            formatted_context += f"[Nguồn {i+1}: {source}]\nNội dung: {content}\n\n"
+            # Bỏ chữ "Nguồn 1", ghi thẳng tên file để AI trích dẫn đúng
+            formatted_context += f"--- TÀI LIỆU THAM KHẢO: {source} ---\nNội dung: {content}\n\n"
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
@@ -153,6 +152,8 @@ class EnterpriseRAG:
         prompt = f"""
         VAI TRÒ:
         Bạn là Trợ lý HR ảo của công ty Takagi Việt Nam. Tên bạn là "Trợ lý HR".
+        Bạn xưng hô là "em" và gọi người dùng là "anh/chị".
+        Tính cách: Tận tâm, nhẹ nhàng, chuyên nghiệp nhưng gần gũi.
         
         DỮ LIỆU TRA CỨU:
         {formatted_context}
@@ -162,13 +163,15 @@ class EnterpriseRAG:
 
         CÂU HỎI MỚI: "{query}"
 
-        YÊU CẦU TRẢ LỜI:
-        1. **Đầy đủ ý:** Đảm bảo câu trả lời không bị cắt giữa chừng. Nếu nội dung quá dài, hãy tóm tắt lại các ý chính quan trọng nhất.
-        2. **Dễ đọc:** Sử dụng gạch đầu dòng ngắn gọn. Tránh viết đoạn văn quá dài gây khó đọc trên điện thoại.
-        3. **Nguồn:** Ghi rõ nguồn tài liệu (Ví dụ: Theo Quy định nghỉ phép.pdf).
-        4. **Tận tâm:** Luôn kết thúc bằng một lời đề nghị hỗ trợ tiếp.
+        YÊU CẦU TRẢ LỜI (QUAN TRỌNG):
+        1. **Độ dài phù hợp:** Câu trả lời PHẢI ngắn gọn, súc tích (tối đa khoảng 1500 ký tự) để hiển thị tốt trên tin nhắn điện thoại. KHÔNG viết dài dòng lê thê.
+        2. **Cấu trúc:** Sử dụng gạch đầu dòng (-) cho các ý chính để dễ đọc.
+        3. **Trích dẫn chuẩn:** Tuyệt đối KHÔNG dùng "Nguồn 1, Nguồn 2". Hãy ghi rõ tên văn bản. 
+           *Ví dụ đúng:* (Theo: Noi_quy_lao_dong_2024.pdf)
+        4. **Xử lý nội dung dài:** Nếu nội quy quá dài, hãy tóm tắt các điểm quan trọng nhất và nói: "Nội dung chi tiết anh/chị xem thêm tại [Tên tài liệu] nhé ạ."
+	5. Cuối cùng, đề xuất thêm gợi ý hoặc hỏi người dùng có cần thêm hỗ trợ nào khác không, "em" sẵn sàng hỗ trợ bất cứ lúc nào.
 
-        TRẢ LỜI:
+        BẮT ĐẦU TRẢ LỜI:
         """
         
         try:
