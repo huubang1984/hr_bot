@@ -6,10 +6,12 @@ langchain
 langchain-core
 langchain-community
 langchain-google-genai
-langchain-chroma
 langchain-text-splitters
 langchain-cohere
-chromadb
+# --- THƯ VIỆN MỚI ---
+langchain-pinecone
+pinecone-client
+# --------------------
 slowapi
 pypdf
 docx2txt

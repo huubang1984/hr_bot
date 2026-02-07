@@ -1,32 +1,29 @@
 import os
-import shutil
 import time
-import gc
-
 # --- CẤU HÌNH GOOGLE CHAT (REST) ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 import google.generativeai as genai
 
-# Cấu hình Google GenAI
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader, PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-# SỬ DỤNG COHERE (Ổn định nhất cho gói Free)
 from langchain_cohere import CohereEmbeddings
+# --- THƯ VIỆN PINECONE MỚI ---
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone, ServerlessSpec
 
 class EnterpriseRAG:
-    def __init__(self, persist_directory="./chroma_db"):
-        self.persist_directory = persist_directory
-        self.vector_store = None
+    def __init__(self):
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.cohere_key = os.getenv("COHERE_API_KEY")
+        self.pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        self.index_name = os.getenv("PINECONE_INDEX_NAME")
         
-        # Cấu hình Cohere Embeddings
+        # Cấu hình Cohere Embeddings (1024 dimensions)
         if self.cohere_key:
             self.embedding_model = CohereEmbeddings(
                 cohere_api_key=self.cohere_key,
@@ -37,26 +34,17 @@ class EnterpriseRAG:
 
     def index_knowledge_base(self):
         if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY."
-
-        # --- FIX LỖI READONLY DATABASE ---
-        # Ngắt kết nối và giải phóng bộ nhớ trước khi xóa
-        self.vector_store = None
-        gc.collect()
-        # --------------------------------
-
-        # 1. Dọn dẹp DB cũ
-        if os.path.exists(self.persist_directory):
-            try: shutil.rmtree(self.persist_directory)
-            except: pass 
+        if not self.pinecone_api_key: return "❌ Lỗi: Thiếu PINECONE_API_KEY."
+        if not self.index_name: return "❌ Lỗi: Thiếu PINECONE_INDEX_NAME."
 
         if not os.path.exists("data"):
             os.makedirs("data")
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING WITH COHERE ---")
+        print("--- 🚀 START INDEXING TO PINECONE CLOUD ---")
         
-        # 2. Quét tài liệu
+        # 1. Quét tài liệu
         for root, dirs, files in os.walk("data"):
             category = os.path.basename(root) if root != "data" else "General"
             docs = []
@@ -75,16 +63,29 @@ class EnterpriseRAG:
 
         if not all_documents: return "No documents found."
         
-        # 3. Cắt nhỏ văn bản
+        # 2. Cắt nhỏ văn bản
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         texts = text_splitter.split_documents(all_documents)
         print(f"Tổng: {len(texts)} đoạn văn.")
 
-        # 4. Lưu vào DB (Batching)
         try:
-            self.vector_store = Chroma(
-                embedding_function=self.embedding_model,
-                persist_directory=self.persist_directory
+            # 3. Kết nối Pinecone và Xóa dữ liệu cũ (Làm sạch Index)
+            pc = Pinecone(api_key=self.pinecone_api_key)
+            index = pc.Index(self.index_name)
+            
+            # Xóa toàn bộ vector cũ để nạp mới (Giống quy trình Re-index cũ)
+            try:
+                index.delete(delete_all=True)
+                print("🗑️ Đã xóa dữ liệu cũ trên Cloud.")
+                time.sleep(2) # Đợi Pinecone xử lý xóa
+            except Exception as e:
+                print(f"⚠️ Không thể xóa (có thể Index trống): {e}")
+
+            # 4. Nạp dữ liệu mới (Batching)
+            vector_store = PineconeVectorStore(
+                index_name=self.index_name,
+                embedding=self.embedding_model,
+                pinecone_api_key=self.pinecone_api_key
             )
             
             batch_size = 20
@@ -92,25 +93,26 @@ class EnterpriseRAG:
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
-                self.vector_store.add_documents(batch)
-                print(f"✅ Cohere: Xong lô {i//batch_size + 1}/{total_batches}")
+                vector_store.add_documents(batch)
+                print(f"☁️ Pinecone Upload: Xong lô {i//batch_size + 1}/{total_batches}")
                 time.sleep(0.5) 
                 
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (Cohere Enterprise)."
+            return f"✅ Thành công! Đã đẩy {len(texts)} đoạn văn lên Mây (Pinecone)."
             
         except Exception as e:
-            return f"❌ Lỗi Indexing Cohere: {str(e)}"
+            return f"❌ Lỗi Indexing Pinecone: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
-        if not self.embedding_model: return "Lỗi: Chưa cấu hình Cohere API Key."
-            
-        self.vector_store = Chroma(
-            persist_directory=self.persist_directory, 
-            embedding_function=self.embedding_model
+        if not self.index_name: return "Lỗi: Chưa cấu hình Pinecone Index."
+        
+        # Kết nối Vector Store từ Cloud
+        vector_store = PineconeVectorStore(
+            index_name=self.index_name,
+            embedding=self.embedding_model,
+            pinecone_api_key=self.pinecone_api_key
         )
         
-        # Model Chat (Google Gemini)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -118,28 +120,25 @@ class EnterpriseRAG:
             transport="rest"
         )
         
-        # --- LOGIC TÌM KIẾM THÔNG MINH ---
         relevant_docs = []
         try:
-            # 1. Thử tìm với category (nếu có)
+            # 1. Tìm kiếm (Logic cũ)
             if category and category != "General":
-                retriever = self.vector_store.as_retriever(
+                retriever = vector_store.as_retriever(
                     search_kwargs={"k": 5, "filter": {"category": category}}
                 )
                 relevant_docs = retriever.invoke(query)
             
-            # 2. Nếu không tìm thấy, tìm toàn bộ
             if not relevant_docs:
-                retriever_all = self.vector_store.as_retriever(search_kwargs={"k": 5})
+                retriever_all = vector_store.as_retriever(search_kwargs={"k": 5})
                 relevant_docs = retriever_all.invoke(query)
                 
             if not relevant_docs:
-                return "Dạ, hiện tại em chưa tìm thấy thông tin này trong hệ thống dữ liệu. Anh/chị kiểm tra lại xem đã cập nhật tài liệu (Re-index) chưa ạ?"
+                return "Dạ, hiện tại em chưa tìm thấy thông tin này trong hệ thống dữ liệu."
                 
         except Exception as e:
-            return f"Lỗi truy vấn DB: {str(e)}"
+            return f"Lỗi truy vấn Pinecone: {str(e)}"
         
-        # Xây dựng Context
         formatted_context = ""
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
@@ -148,7 +147,6 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        # --- PROMPT ---
         prompt = f"""
         VAI TRÒ:
         Bạn là Trợ lý HR ảo của công ty Takagi Việt Nam. Tên bạn là "Trợ lý HR".
@@ -170,7 +168,7 @@ class EnterpriseRAG:
         1. **Trung thực với dữ liệu:** Chỉ trả lời dựa trên thông tin trong phần "DỮ LIỆU TRA CỨU".
         2. **Xử lý khi thiếu tin:** Nếu dữ liệu không chứa câu trả lời, hãy nói: "Dạ, vấn đề này em tìm trong tài liệu nội bộ chưa thấy đề cập. Anh/chị liên hệ trực tiếp phòng Nhân sự để được hỗ trợ chính xác nhất nhé ạ."
         3. **Trích dẫn nguồn:** Cuối câu trả lời, hãy ghi chú nguồn tài liệu tham khảo. Ví dụ: (Theo: Noi_quy_cong_ty.pdf).
-        4. **Phong cách:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời để hỗ trợ nhân viên tốt nhất.
+        4. **Phong cách:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời.
 
         BẮT ĐẦU TRẢ LỜI:
         """
