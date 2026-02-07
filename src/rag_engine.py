@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 
-# --- CẤU HÌNH GOOGLE CHAT (REST) ---
+# --- CẤU HÌNH GOOGLE CHAT ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 import google.generativeai as genai
@@ -13,26 +13,28 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader, Py
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+# SỬ DỤNG COHERE (Ổn định nhất cho gói Free)
+from langchain_cohere import CohereEmbeddings
 
 class EnterpriseRAG:
     def __init__(self, persist_directory="./chroma_db"):
         self.persist_directory = persist_directory
         self.vector_store = None
         self.api_key = os.getenv("GOOGLE_API_KEY")
-        self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        self.cohere_key = os.getenv("COHERE_API_KEY")
         
-        # HuggingFace API
-        if self.hf_token:
-            self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
-                api_key=self.hf_token,
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
+        # Cấu hình Cohere Embeddings
+        # Model: embed-multilingual-v3.0 (Hỗ trợ tiếng Việt cực tốt)
+        if self.cohere_key:
+            self.embedding_model = CohereEmbeddings(
+                cohere_api_key=self.cohere_key,
+                model="embed-multilingual-v3.0"
             )
         else:
             self.embedding_model = None
 
     def index_knowledge_base(self):
-        if not self.hf_token: return "❌ Lỗi: Thiếu HUGGINGFACEHUB_API_TOKEN."
+        if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY trong Environment."
 
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
@@ -44,7 +46,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING V4 (ANTI-COLD-START) ---")
+        print("--- 🚀 START INDEXING WITH COHERE ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -70,58 +72,38 @@ class EnterpriseRAG:
         texts = text_splitter.split_documents(all_documents)
         print(f"Tổng: {len(texts)} đoạn văn.")
 
-        # 4. Lưu vào DB (Batch nhỏ + Retry mạnh mẽ)
+        # 4. Lưu vào DB (Batching an toàn)
         try:
             self.vector_store = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory
             )
             
-            batch_size = 5  # Giảm xuống 5 để cực kỳ nhẹ
+            # Cohere cho phép tốc độ cao, nhưng ta vẫn chia nhỏ để an toàn
+            batch_size = 20
             total_batches = (len(texts) + batch_size - 1) // batch_size
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
-                current_batch_num = i//batch_size + 1
+                self.vector_store.add_documents(batch)
+                print(f"✅ Cohere: Xong lô {i//batch_size + 1}/{total_batches}")
+                time.sleep(0.5) # Nghỉ nhẹ
                 
-                # CƠ CHẾ THỬ LẠI 5 LẦN (Để chờ Model thức dậy)
-                max_retries = 5
-                success = False
-                
-                for attempt in range(max_retries):
-                    try:
-                        self.vector_store.add_documents(batch)
-                        success = True
-                        print(f"✅ Đã xong lô {current_batch_num}/{total_batches}")
-                        time.sleep(0.5) 
-                        break 
-                    except Exception as e:
-                        # Bắt lỗi KeyError (dấu hiệu model đang ngủ)
-                        err_msg = str(e)
-                        if "KeyError" in type(e).__name__ or "'0'" in err_msg:
-                            print(f"⚠️ Model đang ngủ... Đợi 5s để gọi dậy (Lần {attempt+1})")
-                            time.sleep(5) # Ngủ lâu hơn để chờ model load
-                        else:
-                            print(f"⚠️ Lỗi mạng lô {current_batch_num}: {err_msg}. Thử lại...")
-                            time.sleep(2)
-                
-                if not success:
-                    return f"❌ Thất bại tại lô {current_batch_num}. HuggingFace đang quá tải."
-                
-            return f"✅ (V4) Thành công! Đã học xong {len(all_documents)} tài liệu."
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (Cohere Enterprise)."
             
         except Exception as e:
-            return f"❌ Lỗi Indexing V4: {str(e)}"
+            return f"❌ Lỗi Indexing Cohere: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
-        if not self.embedding_model: return "Lỗi: Chưa cấu hình HuggingFace Token."
+        if not self.embedding_model: return "Lỗi: Chưa cấu hình Cohere API Key."
             
         self.vector_store = Chroma(
             persist_directory=self.persist_directory, 
             embedding_function=self.embedding_model
         )
         
+        # Model Chat (Google Gemini)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -137,7 +119,7 @@ class EnterpriseRAG:
             relevant_docs = retriever.invoke(query)
             
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu. Vui lòng chạy Re-index."
+                return "Hệ thống chưa có dữ liệu."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
