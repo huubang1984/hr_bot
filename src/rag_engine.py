@@ -112,6 +112,7 @@ class EnterpriseRAG:
             pinecone_api_key=self.pinecone_api_key
         )
         
+        # Giữ max_output_tokens cao để AI nói hết ý
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -138,13 +139,11 @@ class EnterpriseRAG:
         except Exception as e:
             return f"Lỗi truy vấn Pinecone: {str(e)}"
         
-        # --- SỬA ĐỔI 1: CÁCH FORMAT DỮ LIỆU ĐỂ AI ĐỌC TÊN FILE ---
         formatted_context = ""
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
             content = doc.page_content.replace("\n", " ")
-            # Bỏ chữ "Nguồn 1", ghi thẳng tên file để AI trích dẫn đúng
-            formatted_context += f"--- TÀI LIỆU THAM KHẢO: {source} ---\nNội dung: {content}\n\n"
+            formatted_context += f"--- TÀI LIỆU: {source} ---\nNội dung: {content}\n\n"
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
@@ -163,15 +162,13 @@ class EnterpriseRAG:
 
         CÂU HỎI MỚI: "{query}"
 
-        YÊU CẦU TRẢ LỜI (QUAN TRỌNG):
-        1. **Độ dài phù hợp:** Câu trả lời PHẢI ngắn gọn, súc tích (tối đa khoảng 2000 ký tự) để hiển thị tốt trên tin nhắn điện thoại. Đảm bảo ngắn gọn và đủ ý chính.
-        2. **Cấu trúc:** Sử dụng gạch đầu dòng (-) cho các ý chính để dễ đọc.
-        3. **Trích dẫn chuẩn:** Tuyệt đối KHÔNG dùng "Nguồn 1, Nguồn 2". Hãy ghi rõ tên văn bản. 
-           *Ví dụ đúng:* (Theo: Noi_quy_lao_dong_2024.pdf)
-        4. **Xử lý nội dung dài:** Nếu nội quy quá dài, hãy tóm tắt các điểm quan trọng nhất và nói: "Nội dung chi tiết anh/chị xem thêm tại [Tên tài liệu] nhé ạ."
-	5. Cuối cùng, đề xuất thêm gợi ý hoặc hỏi người dùng có cần thêm hỗ trợ nào khác không, "em" sẵn sàng hỗ trợ bất cứ lúc nào.
+        YÊU CẦU TRẢ LỜI:
+        1. **Chi tiết và Đầy đủ:** Hãy trả lời chi tiết, trích dẫn đầy đủ các điều khoản liên quan để nhân viên hiểu rõ. KHÔNG CẦN RÚT GỌN NỘI DUNG.
+        2. **Trình bày rõ ràng:** Sử dụng gạch đầu dòng (-) cho các ý chính. Ngôn ngữ mạch lạc rõ ràng.
+        3. **Nguồn tài liệu:** Ghi rõ tên văn bản tham khảo ở cuối câu trả lời (Ví dụ: Theo Noi_quy_lao_dong.pdf).
+        4. **Thân thiện:** Giữ giọng văn nhẹ nhàng, tận tâm của HR. Cuối cùng, đề xuất thêm gợi ý hoặc hỏi người dùng có cần thêm hỗ trợ nào khác không, "em" sẵn sàng hỗ trợ bất cứ lúc nào.
 
-        BẮT ĐẦU TRẢ LỜI:
+	BẮT ĐẦU TRẢ LỜI:
         """
         
         try:
