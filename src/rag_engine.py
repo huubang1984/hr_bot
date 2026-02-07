@@ -107,7 +107,7 @@ class EnterpriseRAG:
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
-            temperature=0.1,
+            temperature=0.2,
             transport="rest"
         )
         
@@ -132,7 +132,13 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam.
+        prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam. Hãy trả lời theo quy tắc dưới đây: 
+	1. Dựa vào DỮ LIỆU TRA CỨU để trả lời.
+        2. Nếu không có thông tin, hãy nói: "Xin lỗi, tài liệu nội bộ chưa có thông tin này."
+        3. Cuối câu trả lời, ghi rõ nguồn (Ví dụ: [Nguồn: Noi_quy.pdf]).
+	4. Thống nhất cách xưng hô là "em".
+	5. Phong cách trả lời thể hiện là người tận tâm, dễ gần. Cuối mỗi câu trả lời đưa thêm các gợi ý hoặc đề xuất phù hợp.
+
         DỮ LIỆU: {formatted_context}
         LỊCH SỬ: {safe_history}
         CÂU HỎI: "{query}"
