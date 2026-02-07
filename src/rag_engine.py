@@ -34,13 +34,20 @@ class EnterpriseRAG:
         else:
             self.embedding_model = None
 
-    def index_knowledge_base(self):
+def index_knowledge_base(self):
         if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY."
+
+        # --- ĐOẠN CODE MỚI QUAN TRỌNG: GIẢI PHÓNG DB CŨ ---
+        # Ngắt kết nối Chroma hiện tại để tránh lỗi "Readonly database"
+        self.vector_store = None
+        import gc
+        gc.collect()
+        # --------------------------------------------------
 
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
             try: shutil.rmtree(self.persist_directory)
-            except: pass
+            except: pass # Nếu vẫn không xóa được thì bỏ qua, Chroma sẽ tự xử lý ghi đè
 
         if not os.path.exists("data"):
             os.makedirs("data")
