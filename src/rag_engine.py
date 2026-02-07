@@ -2,12 +2,10 @@ import os
 import shutil
 import time
 
-# --- CẤU HÌNH GOOGLE CHAT (REST) ---
+# --- CẤU HÌNH GOOGLE CHAT ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 import google.generativeai as genai
-
-# Ép Google dùng REST để tránh lỗi gRPC
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
@@ -15,7 +13,6 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader, Py
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Dùng API HuggingFace cho Embeddings (HTTP thuần -> Không lỗi mạng)
 from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 
 class EnterpriseRAG:
@@ -25,8 +22,7 @@ class EnterpriseRAG:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
-        # SỬ DỤNG HUGGINGFACE API CHO EMBEDDINGS
-        # Model này cực nhẹ và phổ biến, server HuggingFace luôn cache sẵn
+        # HuggingFace API (Serverless)
         if self.hf_token:
             self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
                 api_key=self.hf_token,
@@ -36,7 +32,7 @@ class EnterpriseRAG:
             self.embedding_model = None
 
     def index_knowledge_base(self):
-        if not self.hf_token: return "❌ Lỗi: Chưa cấu hình HUGGINGFACEHUB_API_TOKEN trên Render."
+        if not self.hf_token: return "❌ Lỗi: Thiếu HUGGINGFACEHUB_API_TOKEN."
 
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
@@ -48,7 +44,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING (Hybrid: HF Embed + Google Chat) ---")
+        print("--- 🚀 START INDEXING WITH BATCHING ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -72,17 +68,30 @@ class EnterpriseRAG:
         # 3. Cắt nhỏ văn bản
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         texts = text_splitter.split_documents(all_documents)
+        print(f"Tổng số đoạn văn cần xử lý: {len(texts)}")
 
-        # 4. Lưu vào Vector DB
+        # 4. Lưu vào DB theo từng lô nhỏ (Batching) để tránh lỗi 0/Timeout
         try:
-            self.vector_store = Chroma.from_documents(
-                documents=texts, 
-                embedding=self.embedding_model,
+            # Khởi tạo DB trống trước
+            self.vector_store = Chroma(
+                embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (HF API)."
+            
+            batch_size = 32  # Mỗi lần chỉ gửi 32 đoạn
+            total_batches = (len(texts) + batch_size - 1) // batch_size
+            
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                self.vector_store.add_documents(batch)
+                print(f"Processed batch {i//batch_size + 1}/{total_batches}")
+                time.sleep(1) # Nghỉ 1s để API không bị quá tải
+                
+            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu ({len(texts)} đoạn)."
+            
         except Exception as e:
-            return f"❌ Lỗi Indexing: {str(e)}"
+            # In ra lỗi chi tiết để debug
+            return f"❌ Lỗi Indexing: {type(e).__name__} - {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
@@ -111,7 +120,7 @@ class EnterpriseRAG:
             relevant_docs = retriever.invoke(query)
             
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu. Vui lòng chạy Re-index."
+                return "Hệ thống chưa có dữ liệu. Hãy chạy Re-index."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
