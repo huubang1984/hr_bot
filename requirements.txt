@@ -8,9 +8,9 @@ langchain-community
 langchain-google-genai
 langchain-chroma
 langchain-text-splitters
+langchain-cohere
 chromadb
 slowapi
 pypdf
 docx2txt
-# --- THƯ VIỆN MỚI ---
-langchain-cohere
+google-generativeai
