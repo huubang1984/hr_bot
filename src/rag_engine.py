@@ -164,7 +164,7 @@ class EnterpriseRAG:
         CÂU HỎI MỚI: "{query}"
 
         YÊU CẦU TRẢ LỜI (QUAN TRỌNG):
-        1. **Độ dài phù hợp:** Câu trả lời PHẢI ngắn gọn, súc tích (tối đa khoảng 1500 ký tự) để hiển thị tốt trên tin nhắn điện thoại. KHÔNG viết dài dòng lê thê.
+        1. **Độ dài phù hợp:** Câu trả lời PHẢI ngắn gọn, súc tích (tối đa khoảng 2000 ký tự) để hiển thị tốt trên tin nhắn điện thoại. Đảm bảo ngắn gọn và đủ ý chính.
         2. **Cấu trúc:** Sử dụng gạch đầu dòng (-) cho các ý chính để dễ đọc.
         3. **Trích dẫn chuẩn:** Tuyệt đối KHÔNG dùng "Nguồn 1, Nguồn 2". Hãy ghi rõ tên văn bản. 
            *Ví dụ đúng:* (Theo: Noi_quy_lao_dong_2024.pdf)
