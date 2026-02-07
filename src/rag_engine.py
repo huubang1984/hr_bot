@@ -2,10 +2,12 @@ import os
 import shutil
 import time
 
-# --- CẤU HÌNH GOOGLE CHAT ---
+# --- CẤU HÌNH GOOGLE CHAT (REST) ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 import google.generativeai as genai
+
+# Cấu hình Google GenAI
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport="rest")
 
@@ -24,7 +26,6 @@ class EnterpriseRAG:
         self.cohere_key = os.getenv("COHERE_API_KEY")
         
         # Cấu hình Cohere Embeddings
-        # Model: embed-multilingual-v3.0 (Hỗ trợ tiếng Việt cực tốt)
         if self.cohere_key:
             self.embedding_model = CohereEmbeddings(
                 cohere_api_key=self.cohere_key,
@@ -34,7 +35,7 @@ class EnterpriseRAG:
             self.embedding_model = None
 
     def index_knowledge_base(self):
-        if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY trong Environment."
+        if not self.cohere_key: return "❌ Lỗi: Thiếu COHERE_API_KEY."
 
         # 1. Dọn dẹp DB cũ
         if os.path.exists(self.persist_directory):
@@ -72,14 +73,13 @@ class EnterpriseRAG:
         texts = text_splitter.split_documents(all_documents)
         print(f"Tổng: {len(texts)} đoạn văn.")
 
-        # 4. Lưu vào DB (Batching an toàn)
+        # 4. Lưu vào DB (Batching)
         try:
             self.vector_store = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory
             )
             
-            # Cohere cho phép tốc độ cao, nhưng ta vẫn chia nhỏ để an toàn
             batch_size = 20
             total_batches = (len(texts) + batch_size - 1) // batch_size
             
@@ -87,7 +87,7 @@ class EnterpriseRAG:
                 batch = texts[i : i + batch_size]
                 self.vector_store.add_documents(batch)
                 print(f"✅ Cohere: Xong lô {i//batch_size + 1}/{total_batches}")
-                time.sleep(0.5) # Nghỉ nhẹ
+                time.sleep(0.5) 
                 
             return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu (Cohere Enterprise)."
             
@@ -103,46 +103,75 @@ class EnterpriseRAG:
             embedding_function=self.embedding_model
         )
         
-        # Model Chat (Google Gemini)
+        # Model Chat (Google Gemini) - Tăng temp lên xíu cho tự nhiên
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
-            temperature=0.2,
+            temperature=0.3, 
             transport="rest"
         )
         
-        search_kwargs = {"k": 5}
-        if category: search_kwargs["filter"] = {"category": category}
-
+        # --- LOGIC TÌM KIẾM THÔNG MINH HƠN ---
+        relevant_docs = []
         try:
-            retriever = self.vector_store.as_retriever(search_kwargs=search_kwargs)
-            relevant_docs = retriever.invoke(query)
+            # 1. Thử tìm với category (nếu có)
+            if category and category != "General":
+                retriever = self.vector_store.as_retriever(
+                    search_kwargs={"k": 5, "filter": {"category": category}}
+                )
+                relevant_docs = retriever.invoke(query)
             
+            # 2. Nếu không tìm thấy hoặc không có category, tìm toàn bộ DB
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu."
+                retriever_all = self.vector_store.as_retriever(search_kwargs={"k": 5})
+                relevant_docs = retriever_all.invoke(query)
+                
+            # Nếu vẫn không có -> Hệ thống thực sự rỗng hoặc chưa Re-index
+            if not relevant_docs:
+                return "Dạ, hiện tại em chưa tìm thấy thông tin này trong hệ thống dữ liệu. Anh/chị kiểm tra lại xem đã cập nhật tài liệu (Re-index) chưa ạ?"
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
         
+        # Xây dựng Context
         formatted_context = ""
+        unique_sources = set()
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
+            unique_sources.add(source)
             content = doc.page_content.replace("\n", " ")
             formatted_context += f"[Nguồn {i+1}: {source}]\nNội dung: {content}\n\n"
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam. Hãy trả lời theo quy tắc dưới đây: 
-	1. Dựa vào DỮ LIỆU TRA CỨU để trả lời.
-        2. Nếu không có thông tin, hãy nói: "Xin lỗi, tài liệu nội bộ chưa có thông tin này."
-        3. Cuối câu trả lời, ghi rõ nguồn (Ví dụ: [Nguồn: Noi_quy.pdf]).
-	4. Thống nhất cách xưng hô là "em".
-	5. Phong cách trả lời thể hiện là người tận tâm, dễ gần. Cuối mỗi câu trả lời đưa thêm các gợi ý hoặc đề xuất phù hợp.
+        # --- PROMPT MỚI (CHUẨN PERSONA & TẬN TÂM) ---
+        prompt = f"""
+        VAI TRÒ:
+        Bạn là Trợ lý HR ảo của công ty Takagi Việt Nam. Tên bạn là "Trợ lý HR".
+        Bạn xưng hô là "em" và gọi người dùng là "anh/chị".
+        Tính cách: Tận tâm, nhẹ nhàng, chuyên nghiệp nhưng gần gũi, luôn muốn giúp đỡ nhân viên.
 
-        DỮ LIỆU: {formatted_context}
-        LỊCH SỬ: {safe_history}
-        CÂU HỎI: "{query}"
-        TRẢ LỜI:"""
+        NHIỆM VỤ:
+        Trả lời câu hỏi của nhân viên dựa trên DỮ LIỆU ĐƯỢC CUNG CẤP dưới đây.
+
+        DỮ LIỆU TRA CỨU:
+        {formatted_context}
+
+        LỊCH SỬ TRÒ CHUYỆN:
+        {safe_history}
+
+        CÂU HỎI MỚI: "{query}"
+
+        YÊU CẦU TRẢ LỜI:
+        1. **Trung thực với dữ liệu:** Chỉ trả lời dựa trên thông tin trong phần "DỮ LIỆU TRA CỨU".
+        2. **Xử lý khi thiếu tin:** Nếu dữ liệu không chứa câu trả lời, hãy nói: "Dạ, vấn đề này em tìm trong tài liệu nội bộ chưa thấy đề cập. Anh/chị liên hệ trực tiếp phòng Nhân sự để được hỗ trợ chính xác nhất nhé ạ."
+        3. **Trích dẫn nguồn:** Cuối câu trả lời, hãy ghi chú nguồn tài liệu tham khảo. Ví dụ: (Theo: Noi_quy_cong_ty.pdf).
+        4. **Phong cách:** - Bắt đầu bằng lời chào nhẹ nhàng nếu cần.
+           - Giải thích rõ ràng, dễ hiểu.
+           - **QUAN TRỌNG:** Luôn đưa ra một lời khuyên, đề xuất hoặc hành động tiếp theo ở cuối câu trả lời để hỗ trợ nhân viên tốt nhất (Ví dụ: "Anh/chị nhớ nộp đơn trước ngày 5 nhé", "Nếu cần mẫu đơn, anh/chị bảo em nha").
+
+        BẮT ĐẦU TRẢ LỜI:
+        """
         
         try:
             response = llm.invoke(prompt)
