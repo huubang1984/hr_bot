@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 
-# --- CẤU HÌNH GOOGLE CHAT ---
+# --- CẤU HÌNH GOOGLE CHAT (REST) ---
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 import google.generativeai as genai
@@ -22,6 +22,7 @@ class EnterpriseRAG:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
+        # HuggingFace API
         if self.hf_token:
             self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
                 api_key=self.hf_token,
@@ -43,7 +44,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING WITH ROBUST RETRY ---")
+        print("--- 🚀 START INDEXING V4 (ANTI-COLD-START) ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -69,25 +70,22 @@ class EnterpriseRAG:
         texts = text_splitter.split_documents(all_documents)
         print(f"Tổng: {len(texts)} đoạn văn.")
 
-        # 4. Lưu vào DB (Batch nhỏ + Retry)
+        # 4. Lưu vào DB (Batch nhỏ + Retry mạnh mẽ)
         try:
             self.vector_store = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory
             )
             
-            # --- CẤU HÌNH AN TOÀN ---
-            batch_size = 10  # Giảm xuống 10 để cực kỳ an toàn
-            # ------------------------
-            
+            batch_size = 5  # Giảm xuống 5 để cực kỳ nhẹ
             total_batches = (len(texts) + batch_size - 1) // batch_size
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
                 current_batch_num = i//batch_size + 1
                 
-                # CƠ CHẾ THỬ LẠI (RETRY) KHI MẤT MẠNG
-                max_retries = 3
+                # CƠ CHẾ THỬ LẠI 5 LẦN (Để chờ Model thức dậy)
+                max_retries = 5
                 success = False
                 
                 for attempt in range(max_retries):
@@ -95,31 +93,35 @@ class EnterpriseRAG:
                         self.vector_store.add_documents(batch)
                         success = True
                         print(f"✅ Đã xong lô {current_batch_num}/{total_batches}")
-                        time.sleep(1) # Nghỉ 1s
-                        break # Thành công thì thoát vòng lặp thử lại
+                        time.sleep(0.5) 
+                        break 
                     except Exception as e:
-                        print(f"⚠️ Lỗi lô {current_batch_num} (Lần thử {attempt+1}): {str(e)}")
-                        time.sleep(3) # Nghỉ 3s rồi thử lại
+                        # Bắt lỗi KeyError (dấu hiệu model đang ngủ)
+                        err_msg = str(e)
+                        if "KeyError" in type(e).__name__ or "'0'" in err_msg:
+                            print(f"⚠️ Model đang ngủ... Đợi 5s để gọi dậy (Lần {attempt+1})")
+                            time.sleep(5) # Ngủ lâu hơn để chờ model load
+                        else:
+                            print(f"⚠️ Lỗi mạng lô {current_batch_num}: {err_msg}. Thử lại...")
+                            time.sleep(2)
                 
                 if not success:
-                    return f"❌ Thất bại tại lô {current_batch_num} sau 3 lần thử. Vui lòng kiểm tra lại mạng."
+                    return f"❌ Thất bại tại lô {current_batch_num}. HuggingFace đang quá tải."
                 
-            return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu ({len(texts)} đoạn)."
+            return f"✅ (V4) Thành công! Đã học xong {len(all_documents)} tài liệu."
             
         except Exception as e:
-            return f"❌ Lỗi Indexing Fatal: {str(e)}"
+            return f"❌ Lỗi Indexing V4: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
         if not self.embedding_model: return "Lỗi: Chưa cấu hình HuggingFace Token."
             
-        # Kết nối DB
         self.vector_store = Chroma(
             persist_directory=self.persist_directory, 
             embedding_function=self.embedding_model
         )
         
-        # Model Chat (Google Gemini qua REST)
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             google_api_key=self.api_key, 
@@ -127,7 +129,6 @@ class EnterpriseRAG:
             transport="rest"
         )
         
-        # Tìm kiếm
         search_kwargs = {"k": 5}
         if category: search_kwargs["filter"] = {"category": category}
 
@@ -136,12 +137,11 @@ class EnterpriseRAG:
             relevant_docs = retriever.invoke(query)
             
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu."
+                return "Hệ thống chưa có dữ liệu. Vui lòng chạy Re-index."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
         
-        # Xây dựng Context
         formatted_context = ""
         for i, doc in enumerate(relevant_docs):
             source = doc.metadata.get("source_name", "Tài liệu nội bộ")
@@ -150,22 +150,10 @@ class EnterpriseRAG:
 
         safe_history = chat_history.replace("{", "(").replace("}", ")")
         
-        # Prompt
         prompt = f"""Bạn là Trợ lý HR của Takagi Việt Nam.
-        
-        DỮ LIỆU TRA CỨU:
-        {formatted_context}
-        ----------------
-        LỊCH SỬ CHAT:
-        {safe_history}
-        ----------------
+        DỮ LIỆU: {formatted_context}
+        LỊCH SỬ: {safe_history}
         CÂU HỎI: "{query}"
-        
-        YÊU CẦU:
-        1. Trả lời dựa trên dữ liệu tra cứu.
-        2. Nếu không có thông tin, nói "Xin lỗi, không tìm thấy trong tài liệu".
-        3. Ghi nguồn ở cuối câu trả lời.
-        
         TRẢ LỜI:"""
         
         try:
