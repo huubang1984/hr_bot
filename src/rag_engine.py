@@ -22,7 +22,6 @@ class EnterpriseRAG:
         self.api_key = os.getenv("GOOGLE_API_KEY")
         self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
-        # HuggingFace API (Serverless)
         if self.hf_token:
             self.embedding_model = HuggingFaceInferenceAPIEmbeddings(
                 api_key=self.hf_token,
@@ -44,7 +43,7 @@ class EnterpriseRAG:
             return "Folder data created."
             
         all_documents = []
-        print("--- 🚀 START INDEXING WITH BATCHING ---")
+        print("--- 🚀 START INDEXING WITH ROBUST RETRY ---")
         
         # 2. Quét tài liệu
         for root, dirs, files in os.walk("data"):
@@ -68,30 +67,47 @@ class EnterpriseRAG:
         # 3. Cắt nhỏ văn bản
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         texts = text_splitter.split_documents(all_documents)
-        print(f"Tổng số đoạn văn cần xử lý: {len(texts)}")
+        print(f"Tổng: {len(texts)} đoạn văn.")
 
-        # 4. Lưu vào DB theo từng lô nhỏ (Batching) để tránh lỗi 0/Timeout
+        # 4. Lưu vào DB (Batch nhỏ + Retry)
         try:
-            # Khởi tạo DB trống trước
             self.vector_store = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory
             )
             
-            batch_size = 32  # Mỗi lần chỉ gửi 32 đoạn
+            # --- CẤU HÌNH AN TOÀN ---
+            batch_size = 10  # Giảm xuống 10 để cực kỳ an toàn
+            # ------------------------
+            
             total_batches = (len(texts) + batch_size - 1) // batch_size
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
-                self.vector_store.add_documents(batch)
-                print(f"Processed batch {i//batch_size + 1}/{total_batches}")
-                time.sleep(1) # Nghỉ 1s để API không bị quá tải
+                current_batch_num = i//batch_size + 1
+                
+                # CƠ CHẾ THỬ LẠI (RETRY) KHI MẤT MẠNG
+                max_retries = 3
+                success = False
+                
+                for attempt in range(max_retries):
+                    try:
+                        self.vector_store.add_documents(batch)
+                        success = True
+                        print(f"✅ Đã xong lô {current_batch_num}/{total_batches}")
+                        time.sleep(1) # Nghỉ 1s
+                        break # Thành công thì thoát vòng lặp thử lại
+                    except Exception as e:
+                        print(f"⚠️ Lỗi lô {current_batch_num} (Lần thử {attempt+1}): {str(e)}")
+                        time.sleep(3) # Nghỉ 3s rồi thử lại
+                
+                if not success:
+                    return f"❌ Thất bại tại lô {current_batch_num} sau 3 lần thử. Vui lòng kiểm tra lại mạng."
                 
             return f"✅ Thành công! Đã học xong {len(all_documents)} tài liệu ({len(texts)} đoạn)."
             
         except Exception as e:
-            # In ra lỗi chi tiết để debug
-            return f"❌ Lỗi Indexing: {type(e).__name__} - {str(e)}"
+            return f"❌ Lỗi Indexing Fatal: {str(e)}"
 
     def retrieve_answer(self, query, chat_history="", category=None):
         if not self.api_key: return "Lỗi: Chưa cấu hình Google API Key."
@@ -120,7 +136,7 @@ class EnterpriseRAG:
             relevant_docs = retriever.invoke(query)
             
             if not relevant_docs:
-                return "Hệ thống chưa có dữ liệu. Hãy chạy Re-index."
+                return "Hệ thống chưa có dữ liệu."
                 
         except Exception as e:
             return f"Lỗi truy vấn DB: {str(e)}"
