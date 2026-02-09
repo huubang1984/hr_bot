@@ -163,7 +163,7 @@ class EnterpriseRAG:
         CÂU HỎI MỚI: "{query}"
 
         YÊU CẦU TRẢ LỜI:
-        1. **Chi tiết và Đầy đủ:** Hãy trả lời chi tiết, trích dẫn đầy đủ các điều khoản liên quan để nhân viên hiểu rõ. KHÔNG CẦN RÚT GỌN NỘI DUNG.
+        1. **chính xác và dễ hiểu:** Hãy trả lời chính xác và dễ hiểu, trích dẫn đầy đủ các điều khoản liên quan để nhân viên hiểu rõ.
         2. **Trình bày rõ ràng:** Sử dụng gạch đầu dòng (-) cho các ý chính. Ngôn ngữ mạch lạc rõ ràng.
         3. **Nguồn tài liệu:** Ghi rõ tên văn bản tham khảo ở cuối câu trả lời (Ví dụ: Theo Noi_quy_lao_dong.pdf).
         4. **Thân thiện:** Giữ giọng văn nhẹ nhàng, tận tâm của HR. Cuối cùng, đề xuất thêm gợi ý hoặc hỏi người dùng có cần thêm hỗ trợ nào khác không, "em" sẵn sàng hỗ trợ bất cứ lúc nào.
