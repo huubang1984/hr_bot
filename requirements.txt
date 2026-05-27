@@ -10,9 +10,10 @@ langchain-text-splitters
 langchain-cohere
 # --- THƯ VIỆN MỚI ---
 langchain-pinecone
-pinecone-client
+pinecone
 # --------------------
 slowapi
 pypdf
 docx2txt
+openpyxl
 google-generativeai

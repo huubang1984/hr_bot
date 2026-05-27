@@ -1,4 +1,7 @@
 import os
+import logging
+import secrets
+from collections import OrderedDict
 from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -11,7 +14,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- CẤU HÌNH ---
-API_SECRET_TOKEN = os.getenv("API_SECRET_TOKEN", "takagi_secret_2025")
+_DEFAULT_TOKEN = "takagi_secret_2025"
+API_SECRET_TOKEN = os.getenv("API_SECRET_TOKEN", _DEFAULT_TOKEN)
+if API_SECRET_TOKEN == _DEFAULT_TOKEN:
+    logging.warning("API_SECRET_TOKEN chưa được đặt — đang dùng token mặc định KHÔNG an toàn.")
+
+# Số phiên chat tối đa giữ trong RAM (tránh rò rỉ bộ nhớ)
+MAX_SESSIONS = 1000
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Takagi HR Bot Enterprise API (Docker)")
@@ -21,8 +30,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Khởi tạo RAG Engine
 rag = EnterpriseRAG()
 
-# Bộ nhớ tạm
-chat_sessions = {}
+# Bộ nhớ tạm (LRU có giới hạn). Lưu ý: chỉ dùng cho 1 tiến trình —
+# nhiều worker/replica nên thay bằng Redis.
+chat_sessions = OrderedDict()
+
+def save_session(session_id: str, history: str):
+    chat_sessions[session_id] = history
+    chat_sessions.move_to_end(session_id)
+    while len(chat_sessions) > MAX_SESSIONS:
+        chat_sessions.popitem(last=False)
 
 class N8NRequest(BaseModel):
     question: str
@@ -31,7 +47,7 @@ class N8NRequest(BaseModel):
 
 # Hàm kiểm tra bảo mật
 async def verify_token(x_token: str = Header(None)):
-    if x_token != API_SECRET_TOKEN:
+    if not x_token or not secrets.compare_digest(x_token, API_SECRET_TOKEN):
         raise HTTPException(status_code=401, detail="⛔ Unauthorized: Sai mã bảo mật.")
 
 @app.get("/")
@@ -53,7 +69,7 @@ async def chat(request: Request, body: N8NRequest, token_check: None = Depends(v
         
         updated_history = current_history + f"\nUser: {body.question}\nBot: {response_text}\n"
         if len(updated_history) > 2000: updated_history = updated_history[-2000:]
-        chat_sessions[user_id] = updated_history
+        save_session(user_id, updated_history)
         
         return {"status": "success", "answer": response_text}
 

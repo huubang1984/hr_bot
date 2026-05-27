@@ -56,7 +56,7 @@ def ocr_with_gemini():
             ])
             
             # C. Lưu kết quả ra file .txt trong folder data
-            txt_filename = filename.replace(".pdf", ".txt")
+            txt_filename = os.path.splitext(filename)[0] + ".txt"
             output_path = os.path.join(OUTPUT_FOLDER, txt_filename)
             
             with open(output_path, "w", encoding="utf-8") as f:

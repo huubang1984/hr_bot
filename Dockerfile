@@ -4,6 +4,11 @@ FROM python:3.11-slim
 # 2. Thiết lập thư mục làm việc
 WORKDIR /app
 
+# 2b. Cài antiword để đọc file Word .doc cũ (định dạng OLE2)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends antiword \
+    && rm -rf /var/lib/apt/lists/*
+
 # 3. Copy file requirements trước (Để tận dụng Cache)
 # Mẹo: Nếu file này không đổi, Docker sẽ bỏ qua bước cài đặt bên dưới -> Cực nhanh
 COPY requirements.txt .

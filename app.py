@@ -3,6 +3,12 @@ import os
 # Import class xử lý RAG từ backend đã sửa
 from src.rag_engine import EnterpriseRAG
 
+# Tái sử dụng engine theo từng API key (tránh khởi tạo lại mỗi lần rerun)
+@st.cache_resource
+def get_rag(api_key):
+    os.environ["GOOGLE_API_KEY"] = api_key
+    return EnterpriseRAG()
+
 # 1. Cấu hình trang Web
 st.set_page_config(page_title="Trợ lý HR - Takagi VN", page_icon="🤖", layout="wide")
 
@@ -24,13 +30,12 @@ with st.sidebar:
         else:
             with st.spinner("Đang đọc tài liệu và huấn luyện AI..."):
                 # Khởi tạo engine
-                os.environ["GOOGLE_API_KEY"] = user_api_key
-                rag = EnterpriseRAG()
-                
+                rag = get_rag(user_api_key)
+
                 # Gọi hàm index
                 status = rag.index_knowledge_base()
-                
-                if "THÀNH CÔNG" in status:
+
+                if status.startswith("✅"):
                     st.success(status)
                 else:
                     st.error(status)
@@ -61,13 +66,17 @@ if prompt := st.chat_input("Nhập câu hỏi của bạn ở đây..."):
     else:
         with st.spinner("AI đang tra cứu tài liệu..."):
             try:
-                # Thiết lập môi trường
-                os.environ["GOOGLE_API_KEY"] = user_api_key
-                rag = EnterpriseRAG()
-                
+                rag = get_rag(user_api_key)
+
+                # Dựng lịch sử trò chuyện từ các lượt trước (bỏ câu hỏi vừa nhập)
+                history = "".join(
+                    f"\n{'User' if m['role'] == 'user' else 'Bot'}: {m['content']}"
+                    for m in st.session_state.messages[:-1]
+                )
+
                 # Gọi hàm trả lời từ backend
-                final_answer = rag.retrieve_answer(prompt)
-                
+                final_answer = rag.retrieve_answer(prompt, chat_history=history)
+
                 # Hiển thị câu trả lời
                 st.chat_message("assistant").markdown(final_answer)
                 st.session_state.messages.append({"role": "assistant", "content": final_answer})
